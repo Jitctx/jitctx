@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
@@ -59,6 +60,9 @@ func (d *Detector) loadCustomProfiles() []*model.FrameworkProfile {
 	if err != nil {
 		return nil // directory may not exist
 	}
+	// Explicit sort guarantees deterministic precedence (EP01RNF-002) even if
+	// os.ReadDir behaviour changes across OS or Go version.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -78,6 +82,7 @@ func (d *Detector) loadCustomProfiles() []*model.FrameworkProfile {
 			d.logger.Warn("custom profile parse error", "file", path, "reason", err)
 			continue
 		}
+		prof.Source = model.ProfileSourceCustom
 		profiles = append(profiles, prof)
 	}
 	return profiles
@@ -89,6 +94,8 @@ func (d *Detector) loadBundledProfiles() []*model.FrameworkProfile {
 	if err != nil {
 		return nil
 	}
+	// Explicit sort guarantees deterministic precedence (EP01RNF-002).
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
@@ -101,6 +108,7 @@ func (d *Detector) loadBundledProfiles() []*model.FrameworkProfile {
 		if err != nil {
 			continue
 		}
+		prof.Source = model.ProfileSourceBundled
 		profiles = append(profiles, prof)
 	}
 	return profiles

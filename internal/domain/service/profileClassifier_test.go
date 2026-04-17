@@ -1,11 +1,25 @@
 package service_test
 
 import (
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/jitctx/jitctx/internal/domain/model"
 	"github.com/jitctx/jitctx/internal/domain/service"
+	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
 )
+
+// loadBundledForTest loads the real bundled spring-boot-hexagonal profile so
+// tests that verify rule ordering run against the actual YAML, not a synthetic copy.
+func loadBundledForTest(t *testing.T) *model.FrameworkProfile {
+	t.Helper()
+	loader := fsprofile.New(t.TempDir())
+	prof, err := loader.Load(context.Background(), "spring-boot-hexagonal")
+	require.NoError(t, err)
+	return prof
+}
 
 func TestClassifyDeclaration(t *testing.T) {
 	t.Parallel()
@@ -81,6 +95,60 @@ func TestClassifyDeclaration(t *testing.T) {
 			if gotType != tc.wantType {
 				t.Errorf("ClassifyDeclaration type=%v, want %v", gotType, tc.wantType)
 			}
+		})
+	}
+}
+
+// TestClassifyDeclaration_BundledProfile runs two sub-cases against the real
+// bundled spring-boot-hexagonal YAML to lock rule ordering and coverage of
+// EP01RF-012 §Business Rule (explicit @Repository mention).
+func TestClassifyDeclaration_BundledProfile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		decl        model.JavaDeclaration
+		path        string
+		wantType    model.ContractType
+		wantMatched bool
+	}{
+		{
+			// EP01RF-012 §Business Rule — @Repository must classify as jpa-adapter.
+			// No Gherkin scenario covers this today; this test makes the bundled rule
+			// load-bearing (removing it from the YAML would cause this test to fail).
+			name: "repository by annotation classifies as jpa-adapter",
+			decl: model.JavaDeclaration{
+				NodeType:    "class_declaration",
+				Name:        "UserRepositoryImpl",
+				Annotations: []string{"Repository"},
+			},
+			path:        "src/main/java/com/app/user/adapter/out/persistence/UserRepositoryImpl.java",
+			wantType:    model.ContractJPAAdapter,
+			wantMatched: true,
+		},
+		{
+			// Sanity check on rule ordering: the @Entity rule appears before @Service
+			// in the bundled YAML, so a class annotated with both must classify as
+			// entity, not service (first-match-wins semantics).
+			name: "entity rule beats service rule for class annotated with both Entity and Service",
+			decl: model.JavaDeclaration{
+				NodeType:    "class_declaration",
+				Name:        "UserEntity",
+				Annotations: []string{"Entity", "Service"},
+			},
+			path:        "src/main/java/com/app/user/domain/UserEntity.java",
+			wantType:    model.ContractEntity,
+			wantMatched: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			bundled := loadBundledForTest(t)
+			gotType, gotMatched := service.ClassifyDeclaration(tc.decl, tc.path, bundled)
+			require.Equal(t, tc.wantMatched, gotMatched)
+			require.Equal(t, tc.wantType, gotType)
 		})
 	}
 }

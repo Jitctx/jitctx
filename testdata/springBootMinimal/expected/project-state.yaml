@@ -38,6 +38,11 @@ modules:
         methods:
           - signature: Optional<User> findById(Long id)
           - signature: User save(User user)
+      - name: CreateUserServiceImpl
+        type: service
+        path: src/main/java/com/app/user_management/service/CreateUserServiceImpl.java
+        methods:
+          - signature: User execute(String name, String email)
       - name: UserServiceImpl
         type: service
         path: src/main/java/com/app/user_management/service/UserServiceImpl.java

@@ -84,7 +84,10 @@ func (u *Impl) Execute(ctx context.Context, input scanvo.ScanProjectInput) (scan
 	}
 
 	// Step 4: Log profile selected.
-	u.logger.Info("profile selected", "profile", prof.Name)
+	u.logger.Info(
+		fmt.Sprintf("Profile: %s", prof.Name),
+		"source", string(prof.Source),
+	)
 
 	// Step 5: Walk Java files.
 	paths, err := u.walker.WalkJavaFiles(ctx, fsys)

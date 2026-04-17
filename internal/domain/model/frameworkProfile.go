@@ -1,7 +1,18 @@
 package model
 
+// ProfileSource identifies where a profile was loaded from. Populated
+// by the infrastructure adapter at load/detect time; the domain never
+// constructs ProfileSource values itself.
+type ProfileSource string
+
+const (
+	ProfileSourceBundled ProfileSource = "bundled"
+	ProfileSourceCustom  ProfileSource = "custom"
+)
+
 type FrameworkProfile struct {
 	Name            string
+	Source          ProfileSource // populated by fsprofile; zero value means "unknown" and is only valid in tests
 	Detect          ProfileDetect
 	ModuleDetection ModuleDetection
 	Rules           []ProfileRule

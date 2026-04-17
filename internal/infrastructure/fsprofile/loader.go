@@ -67,6 +67,7 @@ func (l *Loader) Load(ctx context.Context, name string) (*model.FrameworkProfile
 				// Fall through to bundled.
 				break
 			}
+			prof.Source = model.ProfileSourceCustom
 			return prof, nil
 		}
 	}
@@ -75,7 +76,12 @@ func (l *Loader) Load(ctx context.Context, name string) (*model.FrameworkProfile
 	if err != nil {
 		return nil, fmt.Errorf("profile %q not found: %w", name, domerr.ErrProfileInvalid)
 	}
-	return decodeProfile(data, true)
+	prof, err := decodeProfile(data, true)
+	if err != nil {
+		return nil, err
+	}
+	prof.Source = model.ProfileSourceBundled
+	return prof, nil
 }
 
 // List returns the names of all available profiles (custom + bundled, deduplicated).
