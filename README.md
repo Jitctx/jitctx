@@ -1,0 +1,298 @@
+<p align="center">
+  <h1 align="center">jitctx</h1>
+  <p align="center">
+    <strong>Stop feeding your AI the entire project. Load only what it needs.</strong>
+  </p>
+  <p align="center">
+    <a href="#quick-start">Quick Start</a> •
+    <a href="#why-jitctx">Why</a> •
+    <a href="#how-it-works">How It Works</a> •
+    <a href="#language-addons">Language Addons</a> •
+    <a href="#roadmap">Roadmap</a>
+  </p>
+  <p align="center">
+    <img src="https://img.shields.io/badge/status-work%20in%20progress-yellow" alt="Status: WIP" />
+    <img src="https://img.shields.io/github/license/jitctx/jitctx" alt="License" />
+    <img src="https://img.shields.io/badge/lang-Go-00ADD8?logo=go" alt="Go" />
+  </p>
+</p>
+
+---
+
+**jitctx** is a CLI tool that gives AI coding agents exactly the context they need - nothing more, nothing less. Instead of dumping your entire codebase, guidelines, and specs into the context window, jitctx loads only the relevant fragments based on what the agent is working on.
+
+Think of it as **lazy loading for AI context**. Your agent asks for what it needs, and jitctx delivers - fast, structured, and within a token budget you control.
+
+## The Problem
+
+Every AI coding tool today - Claude Code, Cursor, Aider, Copilot - struggles with the same bottleneck: **context management is manual and wasteful.**
+
+You're implementing a user authentication endpoint, but your AI agent receives:
+- Guidelines for React components it won't touch
+- Requirements for the billing module it doesn't need
+- Test scenarios for features completely unrelated to the task
+
+The result? **70-80% of loaded context is noise.** You're burning tokens, paying for irrelevant input, and diluting the model's attention - which degrades the quality of its output.
+
+## Why jitctx
+
+| Tool | Approach | Limitation |
+|------|----------|------------|
+| **Repomix** | Packs everything into one file | All-or-nothing, no filtering |
+| **Aider repo-map** | Ranks code by graph relevance | Only maps code, not project artifacts |
+| **Edgee / Headroom** | Compresses tokens at transport layer | Compresses noise instead of removing it |
+| **jitctx** | **Loads only relevant context on demand** | - |
+
+jitctx doesn't compress what's already in the context window. It prevents irrelevant context from entering in the first place.
+
+## Quick Start
+
+```bash
+# Install
+go install github.com/jitctx/jitctx@latest
+
+# Scan your project (generates project-state.yaml)
+jitctx scan
+
+# Query context for a specific module
+jitctx query --module user-management
+
+# Query by tags
+jitctx query --tag auth,security --type guidelines
+
+# Infer module from the file being edited
+jitctx query --file src/main/java/com/app/user/domain/User.java
+
+# Query with a token budget
+jitctx query --module billing --budget 2000
+
+# See the parallel execution plan
+jitctx plan --module user-management
+
+# List available modules and tags
+jitctx list modules
+jitctx list tags
+```
+
+## How It Works
+
+jitctx operates in two phases: **scan** and **query**.
+
+### Phase 1: Scan
+
+```
+Your Codebase ──► jitctx scan ──► project-state.yaml
+```
+
+The `scan` command analyzes your project structure and generates a `project-state.yaml` manifest. Language-specific addons handle the parsing - a Java addon knows about packages, annotations, and Spring Boot conventions; a TypeScript addon understands exports, types, and Next.js routing.
+
+The manifest is a structured map of your project: modules, entities, ports, adapters, endpoints, contracts, dependencies, and links to your engineering artifacts (guidelines, requirements, test scenarios).
+
+### Phase 2: Query
+
+```
+AI Agent ──► jitctx query --module billing --type guidelines ──► stdout (filtered context)
+```
+
+The `query` command reads the manifest, filters by module, type, tags, or file path, respects the token budget, and outputs only the relevant context fragments to stdout. Your AI agent calls it via bash and receives exactly what it needs.
+
+### In Practice with Claude Code
+
+Add this to your `CLAUDE.md`:
+
+```markdown
+## Context Loading
+
+Before implementing any task, load context using jitctx:
+
+    jitctx query --module <module> --type <types> [--tags <tags>] [--budget <tokens>]
+
+Examples:
+- Backend feature: `jitctx query --module user-management --type guidelines,requirements --tags java,api`
+- Tests: `jitctx query --module billing --type scenarios`
+- Full module context: `jitctx query --module notifications`
+
+Always use jitctx. Never read .jitctx/ files directly.
+```
+
+### Example Output
+
+```bash
+$ jitctx query --module user-management --type guidelines --tags security
+```
+
+```markdown
+<!-- jitctx: 2 contexts loaded | ~830 tokens | module=user-management -->
+
+---
+<!-- source: .jitctx/guidelines/java-conventions.md | tags: java, api, security -->
+
+# Java Conventions
+...
+
+---
+<!-- source: .jitctx/guidelines/security.md | tags: security, auth -->
+
+# Security Guidelines
+...
+```
+
+## Project State Schema
+
+The `project-state.yaml` generated by `jitctx scan` follows a universal schema, regardless of language:
+
+```yaml
+generated_at: "2026-04-16T14:30:00-03:00"
+stack:
+  languages: [java, typescript]
+  frameworks: [spring-boot, nextjs]
+
+modules:
+  - id: user-management
+    path: src/main/java/com/app/user
+    tags: [auth, rbac, signup, login, password]
+    contracts:
+      - name: CreateUserUseCase
+        type: input-port
+        path: port/in/CreateUserUseCase.java
+        methods:
+          - signature: "UserResponse execute(CreateUserCommand cmd)"
+      - name: UserRepository
+        type: output-port
+        path: port/out/UserRepository.java
+        methods:
+          - signature: "Optional<User> findByEmail(String email)"
+          - signature: "User save(User user)"
+    dependencies: [notification]
+
+contexts:
+  - id: java-conventions
+    type: guidelines
+    applies_to: [java]
+    tags: [naming, architecture, hexagonal]
+    path: .jitctx/guidelines/java-conventions.md
+    token_estimate: 450
+
+  - id: user-scenarios
+    type: scenarios
+    module: user-management
+    tags: [registration, auth, password-reset]
+    path: .jitctx/scenarios/user-management.feature.md
+    token_estimate: 620
+```
+
+## Contracts and Parallel Execution
+
+jitctx can pre-declare the skeleton of your architecture - interfaces, types, and method signatures - before a single line of implementation exists. This unlocks **deterministic parallelism** for multi-agent workflows.
+
+### How it works
+
+```bash
+$ jitctx plan --module user-management
+```
+
+```
+Layer 0 [parallel - no dependencies]:
+  ├── User.java (aggregate-root)
+  ├── Role.java (entity)
+  ├── CreateUserUseCase.java (input-port)
+  └── UserRepository.java (output-port)
+
+Layer 1 [parallel - depends on layer 0]:
+  ├── UserServiceImpl.java (service → implements CreateUserUseCase)
+  ├── UserController.java (rest-adapter → uses CreateUserUseCase)
+  └── UserRepositoryJpa.java (jpa-adapter → implements UserRepository)
+
+Layer 2 [sequential - depends on layer 1]:
+  └── UserIntegrationTest.java
+```
+
+Each agent receives the contracts it needs via `jitctx contracts`:
+
+```bash
+$ jitctx contracts --for adapter/in/web/UserController.java
+```
+
+```markdown
+## CreateUserUseCase (input-port)
+Path: com.app.user.port.in.CreateUserUseCase
+
+public interface CreateUserUseCase {
+    UserResponse execute(CreateUserCommand cmd);
+}
+```
+
+Agent B can implement `UserController` against this contract while Agent A implements `UserServiceImpl` - in parallel, without conflicts.
+
+## Language Addons
+
+jitctx core is language-agnostic. Language-specific scanning is handled by addons bundled in the same binary.
+
+| Addon | Detects | Scans | Status |
+|-------|---------|-------|--------|
+| `jitctx-java` | `pom.xml`, `build.gradle` | Packages, `@Entity`, interfaces, `@RestController`, hexagonal structure | 🚧 In progress |
+| `jitctx-ts` | `package.json`, `tsconfig.json` | Exports, types, components, API routes, barrel files | 📋 Planned |
+| `jitctx-go` | `go.mod` | Packages, interfaces, structs, handlers | 📋 Planned |
+
+### Writing a Custom Addon
+
+Each addon implements the `LanguageAddon` interface:
+
+```go
+type LanguageAddon interface {
+    Detect(projectRoot string) (bool, float64)
+    Scan(projectRoot string, opts ScanOptions) ([]Module, error)
+    Contracts(module Module) ([]Contract, error)
+    Dependencies(modules []Module) ([]Dependency, error)
+    Info() AddonInfo
+}
+```
+
+The addon receives a project root, scans the codebase using language-specific knowledge, and returns modules and contracts in the universal schema. The core handles everything else - querying, filtering, budgeting, output formatting.
+
+## Token Budget Control
+
+The `--budget` flag is how you keep costs predictable:
+
+```bash
+$ jitctx query --module user-management --budget 2000
+```
+
+jitctx sorts contexts by priority, accumulates estimated token counts, and stops when the budget is reached. The output header tells the agent what was trimmed:
+
+```markdown
+<!-- jitctx: 3/5 contexts loaded | ~1850 tokens | budget=2000 | trimmed: 2 low-priority scenarios -->
+```
+
+The agent knows more context exists and can request it in a follow-up call if needed.
+
+## Roadmap
+
+- [x] Project concept and architecture design
+- [ ] Core: YAML manifest schema and parser
+- [ ] Core: Query engine (module, tag, type, file, budget)
+- [ ] Core: Output formatter (markdown, JSON, raw)
+- [ ] Core: Dependency graph resolver
+- [ ] Core: Plan generator (parallel execution layers)
+- [ ] Core: Contracts extractor
+- [ ] Addon: `jitctx-java` (Spring Boot + hexagonal)
+- [ ] Addon: `jitctx-ts` (Next.js + TypeScript)
+- [ ] Addon: `jitctx-go` (standard patterns)
+- [ ] CLI: `jitctx scan`, `jitctx query`, `jitctx plan`, `jitctx contracts`, `jitctx list`
+- [ ] CLI: `jitctx stats` (token savings metrics)
+- [ ] Integration docs for Claude Code, Cursor, Aider
+- [ ] Scaffold command (generate interface stubs from contracts)
+
+## Contributing
+
+jitctx is in early development. If you're interested in contributing - especially language addons - open an issue to discuss before submitting a PR.
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+<p align="center">
+  <sub>Built by developers who got tired of paying for tokens their AI never needed.</sub>
+</p>
