@@ -77,6 +77,17 @@ func writeQueryMarkdown(w io.Writer, out queryvo.QueryContextOutput) error {
 			return err
 		}
 	}
+	if len(out.Loaded) == 0 {
+		if _, err := fmt.Fprintln(w,
+			"No contexts matched the given filters — try broader filters "+
+				"(drop --type or --tags, or widen --module)."); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+		return nil
+	}
 	for _, c := range out.Loaded {
 		if _, err := fmt.Fprintf(w, "---\n<!-- source: %s | tags: %v -->\n\n%s\n\n", c.Path, c.Tags, c.Body); err != nil {
 			return err

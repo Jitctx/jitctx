@@ -55,6 +55,51 @@ func TestWriteQueryResult_MarkdownHeaderFormat(t *testing.T) {
 	require.Regexp(t, re, firstLine)
 }
 
+func TestWriteQueryResult_MarkdownEmptyResult(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	out := queryvo.QueryContextOutput{
+		Module: queryvo.ModuleSummary{
+			ID:        "billing",
+			Contracts: nil,
+		},
+		Loaded: nil,
+	}
+	err := format.WriteQueryResult(&buf, "markdown", out)
+	require.NoError(t, err)
+	body := buf.String()
+	require.Contains(t, body, "No contexts matched the given filters")
+	require.Contains(t, body, "broader filters")
+	require.NotContains(t, body, "---")
+}
+
+func TestWriteQueryResult_MarkdownEmptyResult_WithContracts(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	out := queryvo.QueryContextOutput{
+		Module: queryvo.ModuleSummary{
+			ID: "billing",
+			Contracts: []queryvo.ContractSummary{
+				{
+					Name:    "PaymentPort",
+					Type:    "input-port",
+					Methods: []string{"void process(PaymentCommand cmd)"},
+				},
+			},
+		},
+		Loaded: nil,
+	}
+	err := format.WriteQueryResult(&buf, "markdown", out)
+	require.NoError(t, err)
+	body := buf.String()
+	require.Contains(t, body, "## Contracts — billing")
+	require.Contains(t, body, "PaymentPort")
+	require.Contains(t, body, "No contexts matched the given filters")
+	require.NotContains(t, body, "---")
+}
+
 func TestWriteScanReport_Markdown(t *testing.T) {
 	t.Parallel()
 

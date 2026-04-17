@@ -2,6 +2,7 @@ package command
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -21,7 +22,26 @@ type queryOpts struct {
 	output  string
 }
 
-func NewQueryCmd(uc queryuc.UseCase, _ *slog.Logger) *cobra.Command {
+// parseArtifactTypes converts raw --type values into domain ArtifactTypes.
+// Unknown values are logged via slog.Warn and dropped (EP01RF-008).
+func parseArtifactTypes(raw []string, logger *slog.Logger) []vo.ArtifactType {
+	out := make([]vo.ArtifactType, 0, len(raw))
+	for _, t := range raw {
+		trimmed := strings.TrimSpace(t)
+		at := vo.ArtifactType(trimmed)
+		if err := at.Validate(); err != nil {
+			logger.Warn("ignoring unknown --type value",
+				"value", trimmed,
+				"accepted", "guidelines|requirements|scenarios|contracts",
+			)
+			continue
+		}
+		out = append(out, at)
+	}
+	return out
+}
+
+func NewQueryCmd(uc queryuc.UseCase, logger *slog.Logger) *cobra.Command {
 	var opts queryOpts
 	cmd := &cobra.Command{
 		Use:   "query",
@@ -32,10 +52,7 @@ func NewQueryCmd(uc queryuc.UseCase, _ *slog.Logger) *cobra.Command {
 			if err != nil {
 				return format.TranslateError(err)
 			}
-			types := make([]vo.ArtifactType, 0, len(opts.types))
-			for _, t := range opts.types {
-				types = append(types, vo.ArtifactType(t))
-			}
+			types := parseArtifactTypes(opts.types, logger)
 			out, err := uc.Execute(cmd.Context(), queryvo.QueryContextInput{
 				WorkDir:  opts.workDir,
 				Module:   opts.module,
@@ -53,8 +70,8 @@ func NewQueryCmd(uc queryuc.UseCase, _ *slog.Logger) *cobra.Command {
 	cmd.Flags().StringVar(&opts.workDir, "dir", ".", "project root to query")
 	cmd.Flags().StringVar(&opts.workDir, "path", ".", "project root to query (alias for --dir)")
 	cmd.Flags().StringVarP(&opts.module, "module", "m", "", "module id (kebab-case)")
-	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "filter by tags")
-	cmd.Flags().StringSliceVar(&opts.types, "type", nil, "artifact types: guidelines|requirements|scenarios|contracts")
+	cmd.Flags().StringSliceVar(&opts.tags, "tags", nil, "filter by tags (comma-separated; OR within the flag)")
+	cmd.Flags().StringSliceVar(&opts.types, "type", nil, "artifact types: guidelines|requirements|scenarios|contracts (comma-separated; unknowns warn and are ignored)")
 	cmd.Flags().StringVar(&opts.file, "file", "", "infer module from this source file")
 	cmd.Flags().IntVar(&opts.budget, "budget", 0, "token budget (0 = unlimited)")
 	cmd.Flags().StringVarP(&opts.output, "output", "o", "markdown", "output format: markdown|json|raw")
