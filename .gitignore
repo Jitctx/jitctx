@@ -1,0 +1,14 @@
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+.vscode/
+.idea/
+.claude
+.docs
+CLAUDE.md
+.devcontainer
+scripts
+/jitctx
+/project-state.yaml

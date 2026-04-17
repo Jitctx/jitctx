@@ -1,0 +1,68 @@
+name: spring-boot-hexagonal
+languages: [java]
+query_lang: java
+
+detect:
+  files:
+    - name: pom.xml
+      contains: "org.springframework.boot"
+    - name: build.gradle
+      contains: "org.springframework.boot"
+    - name: build.gradle.kts
+      contains: "org.springframework.boot"
+
+module_detection:
+  strategy: hexagonal
+  roots:
+    - src/main/java/**/domain
+    - src/main/java/**
+  markers:
+    - kind: path_contains
+      value: /port/in/
+    - kind: path_contains
+      value: /port/out/
+    - kind: annotation
+      value: Entity
+
+rules:
+  - match:
+      node_type: interface_declaration
+      path_contains: /port/in/
+    classify_as: input-port
+
+  - match:
+      node_type: interface_declaration
+      path_contains: /port/out/
+    classify_as: output-port
+
+  - match:
+      node_type: class_declaration
+      has_annotation: Entity
+    classify_as: entity
+
+  - match:
+      node_type: class_declaration
+      has_annotation: RestController
+    classify_as: rest-adapter
+
+  - match:
+      node_type: class_declaration
+      has_annotation: Repository
+    classify_as: jpa-adapter
+
+  - match:
+      node_type: class_declaration
+      has_annotation: Service
+    classify_as: service
+
+  - match:
+      node_type: class_declaration
+      implements: "*UseCase"
+      path_contains: /service/
+    classify_as: service
+
+  - match:
+      node_type: class_declaration
+      implements: "*UseCase"
+      path_contains: /application/
+    classify_as: service

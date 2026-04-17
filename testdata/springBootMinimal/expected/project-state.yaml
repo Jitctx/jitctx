@@ -1,0 +1,56 @@
+generated_at: 2026-04-17T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: notification
+    path: src/main/java/com/app/notification
+    tags: []
+    contracts:
+      - name: SendNotificationUseCase
+        type: input-port
+        path: src/main/java/com/app/notification/port/in/SendNotificationUseCase.java
+        methods:
+          - signature: void send(String recipient, String message)
+    dependencies: []
+  - id: user-management
+    path: src/main/java/com/app/user_management
+    tags: []
+    contracts:
+      - name: UserController
+        type: rest-adapter
+        path: src/main/java/com/app/user_management/adapter/in/web/UserController.java
+        methods: []
+      - name: User
+        type: entity
+        path: src/main/java/com/app/user_management/domain/User.java
+        methods: []
+      - name: CreateUserUseCase
+        type: input-port
+        path: src/main/java/com/app/user_management/port/in/CreateUserUseCase.java
+        methods:
+          - signature: User execute(String name, String email)
+      - name: UserRepository
+        type: output-port
+        path: src/main/java/com/app/user_management/port/out/UserRepository.java
+        methods:
+          - signature: Optional<User> findById(Long id)
+          - signature: User save(User user)
+      - name: UserServiceImpl
+        type: service
+        path: src/main/java/com/app/user_management/service/UserServiceImpl.java
+        methods:
+          - signature: User execute(String name, String email)
+    dependencies:
+      - notification
+contexts:
+  - id: java-conventions
+    type: guidelines
+    tags:
+      - hexagonal
+      - java
+      - naming
+    path: .jitctx/guidelines/java-conventions.md
+    token_estimate: 35
