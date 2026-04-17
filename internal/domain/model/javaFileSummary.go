@@ -11,12 +11,13 @@ type JavaFileSummary struct {
 
 // JavaDeclaration represents a top-level type declaration in a Java file.
 type JavaDeclaration struct {
-	NodeType    string       // "class_declaration" | "interface_declaration" | ...
-	Name        string       // simple name
-	Annotations []string     // simple names, no leading @
-	Implements  []string     // simple and/or qualified interface names
-	Extends     []string     // superclass simple or qualified name (length 0 or 1)
-	Methods     []JavaMethod // class/interface-owned methods
+	NodeType             string       // "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"
+	Name                 string       // simple name
+	Annotations          []string     // simple names, no leading @ (e.g. ["Entity", "Table"])
+	QualifiedAnnotations []string     // same length and order as Annotations; entries are fully-qualified when the source wrote @a.b.C, else equal to the simple name
+	Implements           []string     // simple and/or qualified interface names
+	Extends              []string     // superclass simple or qualified name (length 0 or 1)
+	Methods              []JavaMethod // class/interface-owned methods
 }
 
 // JavaMethod represents a method extracted from a Java declaration.

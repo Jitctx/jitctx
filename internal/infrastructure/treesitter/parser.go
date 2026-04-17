@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"slices"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -56,23 +55,23 @@ func (p *Parser) ParseJavaFile(ctx context.Context, fsys fs.FS, path string) (mo
 	for i := 0; i < int(root.ChildCount()); i++ {
 		child := root.Child(i)
 		switch child.Type() {
-		case "package_declaration":
+		case nodePackageDecl:
 			summary.Package = extractPackage(child, data)
-		case "import_declaration":
+		case nodeImportDecl:
 			imp := extractImport(child, data)
 			if imp != "" {
 				summary.Imports = append(summary.Imports, imp)
 			}
-		case "class_declaration":
+		case nodeClassDecl:
 			decl := extractClassDeclaration(child, data)
 			summary.Declarations = append(summary.Declarations, decl)
-		case "interface_declaration":
+		case nodeInterfaceDecl:
 			decl := extractInterfaceDeclaration(child, data)
 			summary.Declarations = append(summary.Declarations, decl)
-		case "enum_declaration":
+		case nodeEnumDecl:
 			decl := extractEnumDeclaration(child, data)
 			summary.Declarations = append(summary.Declarations, decl)
-		case "record_declaration":
+		case nodeRecordDecl:
 			decl := extractRecordDeclaration(child, data)
 			summary.Declarations = append(summary.Declarations, decl)
 		}
@@ -110,7 +109,7 @@ func extractPackage(node *sitter.Node, src []byte) string {
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		t := child.Type()
-		if t == "scoped_identifier" || t == "identifier" {
+		if t == nodeScopedIdentifier || t == nodeIdentifier {
 			return nodeText(child, src)
 		}
 	}
@@ -122,7 +121,7 @@ func extractImport(node *sitter.Node, src []byte) string {
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		t := child.Type()
-		if t == "scoped_identifier" || t == "identifier" {
+		if t == nodeScopedIdentifier || t == nodeIdentifier {
 			return nodeText(child, src)
 		}
 	}
@@ -130,57 +129,76 @@ func extractImport(node *sitter.Node, src []byte) string {
 }
 
 // extractAnnotations collects annotation names from a modifiers node.
-func extractAnnotations(node *sitter.Node, src []byte) []string {
+// It returns two parallel slices of equal length: simple names and fully-qualified names.
+// When the annotation was written as a simple name (e.g. @Entity), both slices carry
+// the same value. When written as a scoped name (e.g. @jakarta.persistence.Entity),
+// the simple slice carries "Entity" and the qualified slice carries
+// "jakarta.persistence.Entity". Malformed annotations are silently skipped to preserve
+// the invariant len(simple) == len(qualified).
+func extractAnnotations(node *sitter.Node, src []byte) (simple, qualified []string) {
 	if node == nil {
-		return nil
+		return nil, nil
 	}
-	var annotations []string
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
-		case "annotation", "marker_annotation", "normal_annotation":
-			name := findChildByTypes(child, src, "identifier")
-			if name != "" {
-				annotations = append(annotations, name)
+		case nodeAnnotation, nodeMarkerAnnotation, nodeNormalAnnotation:
+			raw := findAnnotationNameChild(child, src)
+			if raw == "" {
+				continue // malformed — skip to keep invariant len(simple) == len(qualified)
 			}
+			simple = append(simple, terminalSegment(raw))
+			qualified = append(qualified, raw)
 		}
 	}
-	return annotations
+	return
 }
 
-// findChildByTypes finds the first child with any of the given types and returns its text.
-func findChildByTypes(node *sitter.Node, src []byte, types ...string) string {
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if slices.Contains(types, child.Type()) {
-			return nodeText(child, src)
+// findAnnotationNameChild returns the source text of the first
+// type_identifier | identifier | scoped_identifier child of an annotation node,
+// or "" when none is found.
+func findAnnotationNameChild(ann *sitter.Node, src []byte) string {
+	for j := 0; j < int(ann.ChildCount()); j++ {
+		c := ann.Child(j)
+		switch c.Type() {
+		case nodeTypeIdentifier, nodeIdentifier, nodeScopedIdentifier:
+			return nodeText(c, src)
 		}
 	}
 	return ""
 }
 
+// terminalSegment returns the trailing ".xxx" segment of a dotted name,
+// or the name itself when no dot is present.
+func terminalSegment(name string) string {
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		return name[idx+1:]
+	}
+	return name
+}
+
 // extractClassDeclaration extracts a class declaration node into a JavaDeclaration.
 func extractClassDeclaration(node *sitter.Node, src []byte) model.JavaDeclaration {
-	decl := model.JavaDeclaration{NodeType: "class_declaration"}
+	decl := model.JavaDeclaration{NodeType: nodeClassDecl}
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
-		case "modifiers":
-			decl.Annotations = extractAnnotations(child, src)
-		case "identifier":
+		case nodeModifiers:
+			decl.Annotations, decl.QualifiedAnnotations = extractAnnotations(child, src)
+		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
-		case "superclass":
+		case nodeSuperclass:
 			// superclass has a type child
 			for j := 0; j < int(child.ChildCount()); j++ {
 				tc := child.Child(j)
-				if tc.Type() == "type_identifier" || tc.Type() == "generic_type" {
+				if tc.Type() == nodeTypeIdentifier || tc.Type() == nodeGenericType {
 					decl.Extends = append(decl.Extends, extractSimpleName(nodeText(tc, src)))
 				}
 			}
-		case "super_interfaces":
+		case nodeSuperInterfaces:
 			decl.Implements = extractTypeList(child, src)
-		case "class_body":
+		case nodeClassBody:
 			decl.Methods = extractMethods(child, src)
 		}
 	}
@@ -189,18 +207,18 @@ func extractClassDeclaration(node *sitter.Node, src []byte) model.JavaDeclaratio
 
 // extractInterfaceDeclaration extracts an interface declaration node.
 func extractInterfaceDeclaration(node *sitter.Node, src []byte) model.JavaDeclaration {
-	decl := model.JavaDeclaration{NodeType: "interface_declaration"}
+	decl := model.JavaDeclaration{NodeType: nodeInterfaceDecl}
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
-		case "modifiers":
-			decl.Annotations = extractAnnotations(child, src)
-		case "identifier":
+		case nodeModifiers:
+			decl.Annotations, decl.QualifiedAnnotations = extractAnnotations(child, src)
+		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
-		case "extends_interfaces":
+		case nodeExtendsInterfaces:
 			decl.Extends = extractTypeList(child, src)
-		case "interface_body":
+		case nodeInterfaceBody:
 			decl.Methods = extractMethods(child, src)
 		}
 	}
@@ -209,15 +227,15 @@ func extractInterfaceDeclaration(node *sitter.Node, src []byte) model.JavaDeclar
 
 // extractEnumDeclaration extracts an enum declaration node.
 func extractEnumDeclaration(node *sitter.Node, src []byte) model.JavaDeclaration {
-	decl := model.JavaDeclaration{NodeType: "enum_declaration"}
+	decl := model.JavaDeclaration{NodeType: nodeEnumDecl}
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
-		case "modifiers":
-			decl.Annotations = extractAnnotations(child, src)
-		case "identifier":
+		case nodeModifiers:
+			decl.Annotations, decl.QualifiedAnnotations = extractAnnotations(child, src)
+		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
-		case "super_interfaces":
+		case nodeSuperInterfaces:
 			decl.Implements = extractTypeList(child, src)
 		}
 	}
@@ -226,15 +244,15 @@ func extractEnumDeclaration(node *sitter.Node, src []byte) model.JavaDeclaration
 
 // extractRecordDeclaration extracts a record declaration node.
 func extractRecordDeclaration(node *sitter.Node, src []byte) model.JavaDeclaration {
-	decl := model.JavaDeclaration{NodeType: "record_declaration"}
+	decl := model.JavaDeclaration{NodeType: nodeRecordDecl}
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
-		case "modifiers":
-			decl.Annotations = extractAnnotations(child, src)
-		case "identifier":
+		case nodeModifiers:
+			decl.Annotations, decl.QualifiedAnnotations = extractAnnotations(child, src)
+		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
-		case "super_interfaces":
+		case nodeSuperInterfaces:
 			decl.Implements = extractTypeList(child, src)
 		}
 	}
@@ -246,13 +264,13 @@ func extractTypeList(node *sitter.Node, src []byte) []string {
 	var types []string
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
-		if child.Type() == "type_list" || child.Type() == "interface_type_list" {
+		if child.Type() == nodeTypeList || child.Type() == nodeInterfaceTypeList {
 			for j := 0; j < int(child.ChildCount()); j++ {
 				tc := child.Child(j)
 				switch tc.Type() {
-				case "type_identifier":
+				case nodeTypeIdentifier:
 					types = append(types, nodeText(tc, src))
-				case "generic_type":
+				case nodeGenericType:
 					// Strip generics for the implements check: List<User> → List
 					types = append(types, extractSimpleName(nodeText(tc, src)))
 				}
@@ -275,7 +293,7 @@ func extractMethods(bodyNode *sitter.Node, src []byte) []model.JavaMethod {
 	var methods []model.JavaMethod
 	for i := 0; i < int(bodyNode.ChildCount()); i++ {
 		child := bodyNode.Child(i)
-		if child.Type() == "method_declaration" {
+		if child.Type() == nodeMethodDecl {
 			sig := buildMethodSignature(child, src)
 			if sig != "" {
 				methods = append(methods, model.JavaMethod{Signature: sig})
@@ -292,16 +310,16 @@ func buildMethodSignature(node *sitter.Node, src []byte) string {
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
-		case "void_type":
+		case nodeVoidType:
 			returnType = "void"
-		case "type_identifier", "integral_type", "floating_point_type", "boolean_type",
-			"array_type", "generic_type":
+		case nodeTypeIdentifier, nodeIntegralType, nodeFloatingPointType, nodeBooleanType,
+			nodeArrayType, nodeGenericType, nodeScopedTypeIdentifier:
 			returnType = nodeText(child, src)
-		case "identifier":
+		case nodeIdentifier:
 			if name == "" { // first identifier is the method name
 				name = nodeText(child, src)
 			}
-		case "formal_parameters":
+		case nodeFormalParameters:
 			params = extractFormalParams(child, src)
 		}
 	}
@@ -318,7 +336,7 @@ func extractFormalParams(node *sitter.Node, src []byte) string {
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
-		case "formal_parameter", "spread_parameter":
+		case nodeFormalParameter, nodeSpreadParameter:
 			parts = append(parts, extractSingleParam(child, src))
 		}
 	}
@@ -331,22 +349,22 @@ func extractSingleParam(node *sitter.Node, src []byte) string {
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
-		case "type_identifier", "integral_type", "floating_point_type", "boolean_type",
-			"array_type", "generic_type", "void_type":
+		case nodeTypeIdentifier, nodeIntegralType, nodeFloatingPointType, nodeBooleanType,
+			nodeArrayType, nodeGenericType, nodeVoidType, nodeScopedTypeIdentifier:
 			paramType = nodeText(child, src)
-		case "variable_declarator_id":
+		case nodeVariableDeclaratorID:
 			// variable_declarator_id has an identifier child
 			for j := 0; j < int(child.ChildCount()); j++ {
 				gc := child.Child(j)
-				if gc.Type() == "identifier" {
+				if gc.Type() == nodeIdentifier {
 					paramName = nodeText(gc, src)
 				}
 			}
-		case "identifier":
+		case nodeIdentifier:
 			if paramType != "" && paramName == "" {
 				paramName = nodeText(child, src)
 			}
-		case "modifiers":
+		case nodeModifiers:
 			// skip final/annotations on parameters
 		}
 	}

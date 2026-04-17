@@ -412,6 +412,45 @@ func TestScanCmd_Integration_MalformedCustomProfileFallback(t *testing.T) {
 	require.Contains(t, infoLogBuf.String(), "Profile: spring-boot-hexagonal")
 }
 
+func TestScanCmd_Integration_MultiAnnotationClass(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	// Copy the springBootMinimal project into a temp directory.
+	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
+
+	// Add the multi-annotation fixture file into the user-management domain package.
+	// The file lives under testdata/springBootMinimal/fixtures/ so it does not affect
+	// the canonical expected/project-state.yaml used by TestScanCmd_Integration_HappyPath.
+	domainDir := filepath.Join(workDir, "src", "main", "java", "com", "app", "user_management", "domain")
+	require.NoError(t, os.MkdirAll(domainDir, 0o755))
+	src := fixtureDir(t, "springBootMinimal", "fixtures", "UserWithTableAnnotation.java")
+	data, err := os.ReadFile(src)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(domainDir, "UserWithTableAnnotation.java"), data, 0o644))
+
+	manifestPath := filepath.Join(workDir, "project-state.yaml")
+	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
+	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+
+	var stdout bytes.Buffer
+	cmd := command.NewScanCmd(factory, discardLogger())
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--path", workDir})
+
+	require.NoError(t, cmd.ExecuteContext(context.Background()))
+
+	manifest, err := os.ReadFile(manifestPath)
+	require.NoError(t, err)
+	manifestStr := string(manifest)
+
+	// The user-management module must contain UserWithTableAnnotation classified as entity.
+	// The bundled profile rule "has_annotation: Entity" -> "classify_as: entity" fires on
+	// the simple annotation name, which must still be extracted when @Table(...) is also present.
+	require.Contains(t, manifestStr, "UserWithTableAnnotation")
+	require.Contains(t, manifestStr, "type: entity")
+}
+
 func TestScanCmd_Integration_ManifestTraversalRejected(t *testing.T) {
 	t.Parallel()
 

@@ -117,3 +117,161 @@ public class UserServiceImpl implements CreateUserUseCase {
 	require.Len(t, summary.Declarations, 1)
 	require.Contains(t, summary.Declarations[0].Implements, "CreateUserUseCase")
 }
+
+func TestParser_MultipleAnnotationsWithArguments(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.app.user.domain;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
+
+@Entity
+@Table(name = "users")
+public class User {}`
+	fsys := fstest.MapFS{
+		"User.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "User.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+	require.Equal(t, []string{"Entity", "Table"}, decl.Annotations)
+	require.Equal(t, []string{"Entity", "Table"}, decl.QualifiedAnnotations)
+}
+
+func TestParser_QualifiedAnnotation(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.app.user.domain;
+
+@jakarta.persistence.Entity
+public class User {}`
+	fsys := fstest.MapFS{
+		"User.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "User.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+	require.Equal(t, []string{"Entity"}, decl.Annotations)
+	require.Equal(t, []string{"jakarta.persistence.Entity"}, decl.QualifiedAnnotations)
+}
+
+func TestParser_MethodReturnGeneric(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.app.user.port.out;
+
+import java.util.Optional;
+
+public interface UserRepository {
+    Optional<User> findByEmail(String email);
+}`
+	fsys := fstest.MapFS{
+		"UserRepository.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "UserRepository.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+	require.Len(t, decl.Methods, 1)
+	require.Equal(t, "Optional<User> findByEmail(String email)", decl.Methods[0].Signature)
+}
+
+func TestParser_MethodParamGeneric(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.app.user.port.in;
+
+public interface CreateBatch {
+    void apply(java.util.List<String> names);
+}`
+	fsys := fstest.MapFS{
+		"CreateBatch.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "CreateBatch.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+	require.Len(t, decl.Methods, 1)
+	require.Equal(t, "void apply(java.util.List<String> names)", decl.Methods[0].Signature)
+}
+
+func TestParser_ImportStatic(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.app.util;
+
+import static java.util.Collections.emptyList;
+import com.app.notification.port.in.SendNotificationUseCase;
+
+public class Helper {}`
+	fsys := fstest.MapFS{
+		"Helper.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "Helper.java")
+	require.NoError(t, err)
+	require.Contains(t, summary.Imports, "com.app.notification.port.in.SendNotificationUseCase")
+	require.Contains(t, summary.Imports, "java.util.Collections.emptyList")
+}
+
+func TestParser_ImportWildcard(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.app.util;
+
+import java.util.*;
+
+public class Helper {}`
+	fsys := fstest.MapFS{
+		"Helper.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "Helper.java")
+	require.NoError(t, err)
+	require.Contains(t, summary.Imports, "java.util")
+}
+
+func TestParser_PartialParseSurfacesErrorAndKeepsValidDeclarations(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.app.mixed;
+
+public class Good {
+    public void doGood() { }
+}
+
+public class Bad {
+    public void doBad(`
+	fsys := fstest.MapFS{
+		"Mixed.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "Mixed.java")
+	require.True(t, errors.Is(err, domerr.ErrPartialParse))
+	require.True(t, summary.HasErrors)
+	require.NotEmpty(t, summary.Declarations)
+
+	// The valid "Good" class must be present among the declarations.
+	var found bool
+	for _, d := range summary.Declarations {
+		if d.NodeType == "class_declaration" && d.Name == "Good" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected 'Good' class declaration to be present in partial parse output")
+}
