@@ -49,11 +49,33 @@ func WriteQueryResult(w io.Writer, format string, out queryvo.QueryContextOutput
 		}
 		return nil
 	}
+	return writeQueryMarkdown(w, out)
+}
+
+func writeQueryMarkdown(w io.Writer, out queryvo.QueryContextOutput) error {
 	if _, err := fmt.Fprintf(w,
 		"<!-- jitctx: %d contexts loaded | ~%d tokens | trimmed: %d -->\n\n",
 		len(out.Loaded), out.TotalTokens, len(out.Trimmed),
 	); err != nil {
 		return err
+	}
+	if out.Module.ID != "" && len(out.Module.Contracts) > 0 {
+		if _, err := fmt.Fprintf(w, "## Contracts — %s\n\n", out.Module.ID); err != nil {
+			return err
+		}
+		for _, c := range out.Module.Contracts {
+			if _, err := fmt.Fprintf(w, "- **%s** (%s)\n", c.Name, c.Type); err != nil {
+				return err
+			}
+			for _, sig := range c.Methods {
+				if _, err := fmt.Fprintf(w, "    - %s\n", sig); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
 	}
 	for _, c := range out.Loaded {
 		if _, err := fmt.Fprintf(w, "---\n<!-- source: %s | tags: %v -->\n\n%s\n\n", c.Path, c.Tags, c.Body); err != nil {

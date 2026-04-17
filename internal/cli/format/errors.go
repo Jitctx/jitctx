@@ -3,6 +3,7 @@ package format
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
 )
@@ -20,7 +21,14 @@ func TranslateError(err error) error {
 	case errors.Is(err, domerr.ErrParseFailure):
 		return fmt.Errorf("fatal java parse failure: %w", err)
 	case errors.Is(err, domerr.ErrManifestNotFound):
-		return fmt.Errorf("manifest not found — run 'jitctx scan' first")
+		return fmt.Errorf("project-state.yaml not found; run 'jitctx scan' first")
+	}
+	var mnf *domerr.ModuleNotFoundError
+	if errors.As(err, &mnf) {
+		return fmt.Errorf("module %q not found; available modules: %s",
+			mnf.Queried, strings.Join(mnf.AvailableSorted, ", "))
+	}
+	switch {
 	case errors.Is(err, domerr.ErrModuleNotFound):
 		return fmt.Errorf("module not found in manifest")
 	case errors.Is(err, domerr.ErrProfileInvalid):

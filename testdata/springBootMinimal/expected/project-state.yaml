@@ -54,3 +54,10 @@ contexts:
       - naming
     path: .jitctx/guidelines/java-conventions.md
     token_estimate: 35
+  - id: user-scenarios
+    type: guidelines
+    module: user-management
+    tags:
+      - user
+    path: .jitctx/guidelines/user-scenarios.md
+    token_estimate: 36

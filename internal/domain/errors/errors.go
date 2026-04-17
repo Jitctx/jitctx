@@ -29,3 +29,21 @@ func (e *ProfileConflictError) Error() string {
 func (e *ProfileConflictError) Is(target error) bool {
 	return errors.Is(target, ErrProfileInvalid)
 }
+
+// ModuleNotFoundError carries the queried module id and the sorted list of
+// available module ids so the presentation layer can produce the
+// user-friendly stderr required by EP01RNF-003.
+type ModuleNotFoundError struct {
+	Queried         string   // the id the user asked for
+	AvailableSorted []string // module ids, alphabetically sorted
+}
+
+func (e *ModuleNotFoundError) Error() string {
+	return fmt.Sprintf("module %q not found", e.Queried)
+}
+
+// Is makes errors.Is(err, ErrModuleNotFound) return true so existing
+// call-sites keep working after we introduce the typed variant.
+func (e *ModuleNotFoundError) Is(target error) bool {
+	return errors.Is(target, ErrModuleNotFound)
+}

@@ -36,7 +36,7 @@ func TestTranslateError(t *testing.T) {
 		{
 			name:     "ErrManifestNotFound",
 			err:      domerr.ErrManifestNotFound,
-			contains: "manifest not found",
+			contains: "project-state.yaml not found",
 		},
 		{
 			name:     "ErrModuleNotFound",

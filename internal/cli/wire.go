@@ -52,7 +52,7 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 
 	return Deps{
 		ScanFactory: scanFactory,
-		Query:       appqueryuc.New(manifestStore, estimator, logger),
+		Query:       appqueryuc.New(manifestStore, ctxDiscoverer, estimator, logger),
 		Plan:        appplanuc.New(manifestStore, logger),
 		Contracts:   appcontractsuc.New(manifestStore, tsParser, logger),
 		Logger:      logger,

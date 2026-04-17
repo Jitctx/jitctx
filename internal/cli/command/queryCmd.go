@@ -12,12 +12,13 @@ import (
 )
 
 type queryOpts struct {
-	module string
-	tags   []string
-	types  []string
-	file   string
-	budget int
-	output string
+	workDir string
+	module  string
+	tags    []string
+	types   []string
+	file    string
+	budget  int
+	output  string
 }
 
 func NewQueryCmd(uc queryuc.UseCase, _ *slog.Logger) *cobra.Command {
@@ -36,6 +37,7 @@ func NewQueryCmd(uc queryuc.UseCase, _ *slog.Logger) *cobra.Command {
 				types = append(types, vo.ArtifactType(t))
 			}
 			out, err := uc.Execute(cmd.Context(), queryvo.QueryContextInput{
+				WorkDir:  opts.workDir,
 				Module:   opts.module,
 				Tags:     opts.tags,
 				Types:    types,
@@ -48,11 +50,14 @@ func NewQueryCmd(uc queryuc.UseCase, _ *slog.Logger) *cobra.Command {
 			return format.WriteQueryResult(cmd.OutOrStdout(), opts.output, out)
 		},
 	}
+	cmd.Flags().StringVar(&opts.workDir, "dir", ".", "project root to query")
+	cmd.Flags().StringVar(&opts.workDir, "path", ".", "project root to query (alias for --dir)")
 	cmd.Flags().StringVarP(&opts.module, "module", "m", "", "module id (kebab-case)")
 	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "filter by tags")
 	cmd.Flags().StringSliceVar(&opts.types, "type", nil, "artifact types: guidelines|requirements|scenarios|contracts")
 	cmd.Flags().StringVar(&opts.file, "file", "", "infer module from this source file")
 	cmd.Flags().IntVar(&opts.budget, "budget", 0, "token budget (0 = unlimited)")
 	cmd.Flags().StringVarP(&opts.output, "output", "o", "markdown", "output format: markdown|json|raw")
+	_ = cmd.MarkFlagRequired("module")
 	return cmd
 }
