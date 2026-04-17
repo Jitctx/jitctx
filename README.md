@@ -7,8 +7,9 @@
     <a href="#quick-start">Quick Start</a> •
     <a href="#why-jitctx">Why</a> •
     <a href="#how-it-works">How It Works</a> •
-    <a href="#language-addons">Language Addons</a> •
-    <a href="#roadmap">Roadmap</a>
+    <a href="#tree-sitter--framework-profiles">Framework Profiles</a> •
+    <a href="#roadmap">Roadmap</a> •
+    <a href="README.pt-BR.md">Português</a>
   </p>
   <p align="center">
     <img src="https://img.shields.io/badge/status-work%20in%20progress-yellow" alt="Status: WIP" />
@@ -84,7 +85,7 @@ jitctx operates in two phases: **scan** and **query**.
 Your Codebase ──► jitctx scan ──► project-state.yaml
 ```
 
-The `scan` command analyzes your project structure and generates a `project-state.yaml` manifest. Language-specific addons handle the parsing - a Java addon knows about packages, annotations, and Spring Boot conventions; a TypeScript addon understands exports, types, and Next.js routing.
+The `scan` command analyzes your project structure and generates a `project-state.yaml` manifest. jitctx uses [Tree-sitter](https://tree-sitter.github.io/) to parse source code into ASTs across 100+ languages, then applies **framework profiles** (declarative YAML rules) to classify what it finds. A Spring Boot profile knows that `@Entity` means an aggregate, that `port/in/` contains input ports, and that `@RestController` marks a REST adapter.
 
 The manifest is a structured map of your project: modules, entities, ports, adapters, endpoints, contracts, dependencies, and links to your engineering artifacts (guidelines, requirements, test scenarios).
 
@@ -224,31 +225,90 @@ public interface CreateUserUseCase {
 
 Agent B can implement `UserController` against this contract while Agent A implements `UserServiceImpl` - in parallel, without conflicts.
 
-## Language Addons
+## Tree-sitter + Framework Profiles
 
-jitctx core is language-agnostic. Language-specific scanning is handled by addons bundled in the same binary.
+jitctx doesn't ship one parser per language. It uses [Tree-sitter](https://tree-sitter.github.io/) for universal AST parsing and **framework profiles** (declarative YAML) to interpret what the AST means in your architecture.
 
-| Addon | Detects | Scans | Status |
-|-------|---------|-------|--------|
-| `jitctx-java` | `pom.xml`, `build.gradle` | Packages, `@Entity`, interfaces, `@RestController`, hexagonal structure | 🚧 In progress |
-| `jitctx-ts` | `package.json`, `tsconfig.json` | Exports, types, components, API routes, barrel files | 📋 Planned |
-| `jitctx-go` | `go.mod` | Packages, interfaces, structs, handlers | 📋 Planned |
-
-### Writing a Custom Addon
-
-Each addon implements the `LanguageAddon` interface:
-
-```go
-type LanguageAddon interface {
-    Detect(projectRoot string) (bool, float64)
-    Scan(projectRoot string, opts ScanOptions) ([]Module, error)
-    Contracts(module Module) ([]Contract, error)
-    Dependencies(modules []Module) ([]Dependency, error)
-    Info() AddonInfo
-}
+```
+Source Code ──► Tree-sitter (AST) ──► Framework Profile (rules) ──► project-state.yaml
 ```
 
-The addon receives a project root, scans the codebase using language-specific knowledge, and returns modules and contracts in the universal schema. The core handles everything else - querying, filtering, budgeting, output formatting.
+### How it works
+
+Tree-sitter parses your code into an AST. The framework profile tells jitctx how to classify what it finds:
+
+```yaml
+# profiles/spring-boot-hexagonal.yaml
+name: spring-boot-hexagonal
+detect:
+  files: ["pom.xml", "build.gradle"]
+  dependencies: ["org.springframework.boot"]
+
+rules:
+  - match:
+      node_type: interface_declaration
+      path_contains: "port/in"
+    classify_as: input-port
+
+  - match:
+      node_type: class_declaration
+      has_annotation: "Entity"
+    classify_as: entity
+
+  - match:
+      node_type: class_declaration
+      has_annotation: "RestController"
+    classify_as: rest-adapter
+    extract_endpoints: true
+
+  - match:
+      node_type: class_declaration
+      implements: "*UseCase"
+    classify_as: service
+```
+
+### Built-in profiles
+
+| Profile | Detects | Classifies | Status |
+|---------|---------|------------|--------|
+| `spring-boot-hexagonal` | `pom.xml`, `build.gradle` | Ports, adapters, entities, controllers, services | 🚧 In progress |
+| `nextjs-app-router` | `package.json`, `next.config.*` | Routes, components, API handlers, hooks, types | 📋 Planned |
+| `go-standard` | `go.mod` | Packages, interfaces, structs, handlers | 📋 Planned |
+
+### Adding a new framework
+
+Supporting a new framework means writing a YAML file, not Go code. No recompilation needed:
+
+```bash
+# Drop a profile into your project
+cp my-django-profile.yaml .jitctx/profiles/
+
+# jitctx auto-discovers and applies it
+jitctx scan
+```
+
+This is what makes jitctx scalable. The community can contribute profiles for Django, FastAPI, Gin, Axum, NestJS, Laravel, Rails, or any other framework without touching the core codebase. A profile is ~20-40 lines of YAML.
+
+### Tree-sitter query sets
+
+Each language needs a small set of Tree-sitter queries (~10-15 lines) to extract structural elements. These are `.scm` files bundled with the binary:
+
+```scheme
+;; queries/java.scm
+(interface_declaration name: (identifier) @name) @interface
+(class_declaration name: (identifier) @name) @class
+(method_declaration name: (identifier) @name) @method
+(annotation name: (identifier) @annotation)
+```
+
+```scheme
+;; queries/typescript.scm
+(interface_declaration name: (type_identifier) @name) @interface
+(class_declaration name: (type_identifier) @name) @class
+(export_statement declaration: (_) @exported)
+```
+
+jitctx ships with query sets for Java, TypeScript, Go, and Python out of the box. Adding a new language is a matter of writing a `.scm` file with the relevant node types.
 
 ## Token Budget Control
 
@@ -275,9 +335,11 @@ The agent knows more context exists and can request it in a follow-up call if ne
 - [ ] Core: Dependency graph resolver
 - [ ] Core: Plan generator (parallel execution layers)
 - [ ] Core: Contracts extractor
-- [ ] Addon: `jitctx-java` (Spring Boot + hexagonal)
-- [ ] Addon: `jitctx-ts` (Next.js + TypeScript)
-- [ ] Addon: `jitctx-go` (standard patterns)
+- [ ] Tree-sitter: Integration and AST extraction engine
+- [ ] Tree-sitter: Query sets for Java, TypeScript, Go, Python
+- [ ] Profile: `spring-boot-hexagonal`
+- [ ] Profile: `nextjs-app-router`
+- [ ] Profile: `go-standard`
 - [ ] CLI: `jitctx scan`, `jitctx query`, `jitctx plan`, `jitctx contracts`, `jitctx list`
 - [ ] CLI: `jitctx stats` (token savings metrics)
 - [ ] Integration docs for Claude Code, Cursor, Aider
@@ -285,7 +347,7 @@ The agent knows more context exists and can request it in a follow-up call if ne
 
 ## Contributing
 
-jitctx is in early development. If you're interested in contributing - especially language addons - open an issue to discuss before submitting a PR.
+jitctx is in early development. If you're interested in contributing - especially framework profiles or Tree-sitter query sets for new languages - open an issue to discuss before submitting a PR.
 
 ## License
 
