@@ -48,6 +48,8 @@ func WriteQueryResult(w io.Writer, format string, out queryvo.QueryContextOutput
 			}
 		}
 		return nil
+	case "yaml":
+		return writeQueryYAML(w, out)
 	}
 	return writeQueryMarkdown(w, out)
 }

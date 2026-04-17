@@ -74,7 +74,8 @@ func NewQueryCmd(uc queryuc.UseCase, logger *slog.Logger) *cobra.Command {
 	cmd.Flags().StringSliceVar(&opts.types, "type", nil, "artifact types: guidelines|requirements|scenarios|contracts (comma-separated; unknowns warn and are ignored)")
 	cmd.Flags().StringVar(&opts.file, "file", "", "infer module from this source file")
 	cmd.Flags().IntVar(&opts.budget, "budget", 0, "token budget (0 = unlimited)")
-	cmd.Flags().StringVarP(&opts.output, "output", "o", "markdown", "output format: markdown|json|raw")
+	cmd.Flags().StringVarP(&opts.output, "output", "o", "markdown", "output format: markdown|json|raw|yaml")
+	cmd.Flags().StringVar(&opts.output, "format", "markdown", "output format: markdown|json|raw|yaml (alias of --output)")
 	_ = cmd.MarkFlagRequired("module")
 	return cmd
 }
