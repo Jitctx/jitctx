@@ -12,7 +12,7 @@
     <a href="README.pt-BR.md">Português</a>
   </p>
   <p align="center">
-    <img src="https://img.shields.io/badge/status-work%20in%20progress-yellow" alt="Status: WIP" />
+    <img src="https://img.shields.io/badge/status-MVP%20%E2%80%94%20Epic%2001%20complete-brightgreen" alt="Status: MVP" />
     <img src="https://img.shields.io/github/license/jitctx/jitctx" alt="License" />
     <img src="https://img.shields.io/badge/lang-Go-00ADD8?logo=go" alt="Go" />
   </p>
@@ -49,31 +49,32 @@ jitctx doesn't compress what's already in the context window. It prevents irrele
 ## Quick Start
 
 ```bash
-# Install
-go install github.com/jitctx/jitctx@latest
+# Build from source (Go 1.25+)
+go build ./cmd/jitctx
 
-# Scan your project (generates project-state.yaml)
-jitctx scan
+# Scan a Spring Boot Hexagonal project (generates project-state.yaml)
+jitctx scan --path /path/to/project        # alias: --dir
 
-# Query context for a specific module
+# Query context for a specific module (Markdown is the default format)
 jitctx query --module user-management
 
-# Query by tags
-jitctx query --tag auth,security --type guidelines
+# Filter by type — comma-separated, OR-within-flag
+jitctx query --module user-management --type guidelines,scenarios
 
-# Infer module from the file being edited
-jitctx query --file src/main/java/com/app/user/domain/User.java
+# Filter by tags — comma-separated, OR-within-flag, AND across --type and --tags
+jitctx query --module user-management --tags security,auth
 
-# Query with a token budget
-jitctx query --module billing --budget 2000
+# Combine all filters
+jitctx query --module user-management --type guidelines --tags security
 
-# See the parallel execution plan
-jitctx plan --module user-management
-
-# List available modules and tags
-jitctx list modules
-jitctx list tags
+# YAML output instead of Markdown
+jitctx query --module user-management --format yaml   # alias: --output
 ```
+
+> **Status (Epic 01 — MVP):** `jitctx scan` and `jitctx query` are implemented
+> end-to-end for Spring Boot Hexagonal projects. `jitctx plan`, `jitctx
+> contracts`, `jitctx list`, and `jitctx stats`, plus the `--budget` and
+> `--file` query flags, are planned for future epics — see the [Roadmap](#roadmap).
 
 ## How It Works
 
@@ -123,19 +124,58 @@ $ jitctx query --module user-management --type guidelines --tags security
 ```
 
 ```markdown
-<!-- jitctx: 2 contexts loaded | ~830 tokens | module=user-management -->
+<!-- jitctx: 2 contexts loaded | ~830 tokens | trimmed: 0 -->
+
+## Contracts — user-management
+
+- **CreateUserUseCase** (input-port)
+  - `UserResponse execute(CreateUserCommand cmd)`
 
 ---
-<!-- source: .jitctx/guidelines/java-conventions.md | tags: java, api, security -->
+<!-- context: java-conventions | type: guidelines | tags: java, api, security -->
 
 # Java Conventions
 ...
 
 ---
-<!-- source: .jitctx/guidelines/security.md | tags: security, auth -->
+<!-- context: security-guidelines | type: guidelines | tags: security, auth -->
 
 # Security Guidelines
 ...
+```
+
+The same query in YAML:
+
+```bash
+$ jitctx query --module user-management --type guidelines --tags security --format yaml
+```
+
+```yaml
+metadata:
+  module: user-management
+  context_count: 2
+  token_total: 830
+  trimmed_count: 0
+  contracts:
+    - name: CreateUserUseCase
+      type: input-port
+      methods:
+        - "UserResponse execute(CreateUserCommand cmd)"
+contexts:
+  - path: .jitctx/guidelines/java-conventions.md
+    type: guidelines
+    tags: [java, api, security]
+    token_estimate: 450
+    content: |
+      # Java Conventions
+      ...
+  - path: .jitctx/guidelines/security.md
+    type: guidelines
+    tags: [security, auth]
+    token_estimate: 380
+    content: |
+      # Security Guidelines
+      ...
 ```
 
 ## Project State Schema
@@ -271,7 +311,7 @@ rules:
 
 | Profile | Detects | Classifies | Status |
 |---------|---------|------------|--------|
-| `spring-boot-hexagonal` | `pom.xml`, `build.gradle` | Ports, adapters, entities, controllers, services | 🚧 In progress |
+| `spring-boot-hexagonal` | `pom.xml`, `build.gradle`, `build.gradle.kts` | Ports, adapters, entities, controllers, services, JPA repositories | ✅ Shipped (Epic 01) |
 | `nextjs-app-router` | `package.json`, `next.config.*` | Routes, components, API handlers, hooks, types | 📋 Planned |
 | `go-standard` | `go.mod` | Packages, interfaces, structs, handlers | 📋 Planned |
 
@@ -328,20 +368,38 @@ The agent knows more context exists and can request it in a follow-up call if ne
 
 ## Roadmap
 
-- [x] Project concept and architecture design
-- [ ] Core: YAML manifest schema and parser
-- [ ] Core: Query engine (module, tag, type, file, budget)
-- [ ] Core: Output formatter (markdown, JSON, raw)
-- [ ] Core: Dependency graph resolver
+### Epic 01 — End-to-End MVP (Scan and Query) ✅ Complete
+
+- [x] Project concept and architecture design (DDD + Clean Architecture in Go)
+- [x] Core: YAML manifest schema, loader, atomic-rename writer
+- [x] Core: Module / context discovery from `.jitctx/`
+- [x] Core: Token-estimate heuristic (runes / 4)
+- [x] Core: Inter-module dependency detection from imports
+- [x] Tree-sitter: Java integration (classes, interfaces, enums, records)
+  - [x] Multi-annotation extraction (`@Entity @Table(name="users")`)
+  - [x] Qualified annotation names (`@jakarta.persistence.Entity`)
+  - [x] Generic types in method signatures (`Optional<User>`, `java.util.List<String>`)
+  - [x] Partial-parse tolerance (valid declarations survive ERROR nodes)
+- [x] Profile: `spring-boot-hexagonal` (auto-detect via `pom.xml` / `build.gradle` / `build.gradle.kts`)
+  - [x] Path classification (`port/in/`, `port/out/`)
+  - [x] Annotation classification (`@Entity`, `@RestController`, `@Repository`, `@Service`)
+  - [x] Implementation heuristic (`*UseCase` + `service`/`application` path → service)
+  - [x] Custom profiles in `.jitctx/profiles/` override bundled
+- [x] Core: Query engine (filter by module, type, tags, with effective tag-set projection)
+- [x] CLI: `jitctx scan` and `jitctx query` (cobra, slog→stderr, output→stdout)
+- [x] Output formatter: Markdown (default) and YAML (`--format yaml`)
+- [x] Typed errors with actionable hints (missing manifest → `run 'jitctx scan' first`; unknown module → lists available modules sorted)
+
+### Future epics
+
+- [ ] Core: Token-budget enforcement (`--budget` flag, priority-based trimming)
+- [ ] Core: File-based module inference (`--file` flag)
 - [ ] Core: Plan generator (parallel execution layers)
 - [ ] Core: Contracts extractor
-- [ ] Tree-sitter: Integration and AST extraction engine
-- [ ] Tree-sitter: Query sets for Java, TypeScript, Go, Python
-- [ ] Profile: `spring-boot-hexagonal`
+- [ ] CLI: `jitctx plan`, `jitctx contracts`, `jitctx list`, `jitctx stats`
+- [ ] Tree-sitter: Query sets for TypeScript, Go, Python
 - [ ] Profile: `nextjs-app-router`
 - [ ] Profile: `go-standard`
-- [ ] CLI: `jitctx scan`, `jitctx query`, `jitctx plan`, `jitctx contracts`, `jitctx list`
-- [ ] CLI: `jitctx stats` (token savings metrics)
 - [ ] Integration docs for Claude Code, Cursor, Aider
 - [ ] Scaffold command (generate interface stubs from contracts)
 
