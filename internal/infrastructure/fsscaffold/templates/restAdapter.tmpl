@@ -1,0 +1,25 @@
+package {{.Package}};
+{{range .Imports}}
+import {{.}};
+{{- end}}
+{{range .ClassAnnotations}}
+{{.}}
+{{- end}}
+public class {{.ClassName}} {
+{{range .Dependencies}}
+    private final {{.Type}} {{.FieldName}};
+{{- end}}
+
+    public {{.ClassName}}({{range $i, $d := .Dependencies}}{{if $i}}, {{end}}{{$d.Type}} {{$d.FieldName}}{{end}}) {
+{{- range .Dependencies}}
+        this.{{.FieldName}} = {{.FieldName}};
+{{- end}}
+    }
+{{range .Endpoints}}
+
+    {{.Annotation}}
+    public Object {{.Method}}() {
+        {{.Body}}
+    }
+{{- end}}
+}

@@ -77,5 +77,25 @@ func TranslateError(err error) error {
 	case errors.Is(err, domerr.ErrNotImplemented):
 		return fmt.Errorf("command not yet implemented")
 	}
+	var sce *domerr.ScaffoldConflictError
+	if errors.As(err, &sce) {
+		var b strings.Builder
+		b.WriteString("scaffold aborted: target files already exist:")
+		for _, p := range sce.Conflicts {
+			fmt.Fprintf(&b, "\n  - %s", p)
+		}
+		b.WriteString("\ndelete the listed files and re-run, or scaffold a different feature")
+		return errors.New(b.String())
+	}
+	if errors.Is(err, domerr.ErrSpecMissingPackage) {
+		return errors.New("spec is missing the required Package: field; add 'Package: <java.package>' after the 'Module:' line")
+	}
+	var sre *domerr.ScaffoldRenderError
+	if errors.As(err, &sre) {
+		if sre.Cause != nil {
+			return fmt.Errorf("failed to render contract %q: %w", sre.Contract, sre.Cause)
+		}
+		return fmt.Errorf("failed to render contract %q", sre.Contract)
+	}
 	return fmt.Errorf("error: %w", err)
 }

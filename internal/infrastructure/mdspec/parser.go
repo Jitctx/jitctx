@@ -115,6 +115,17 @@ func (p *Parser) ParseSpec(ctx context.Context, content string) (model.FeatureSp
 				moduleFound = true
 				continue
 			}
+			if pkg, ok := parseFieldValue("Package", trimmed); ok {
+				if !moduleFound {
+					// Package before Module: emit warning but accept.
+					warnings = append(warnings, domerr.SpecParseWarning{
+						Line:    lineNum,
+						Message: "found 'Package:' before 'Module:'",
+					})
+				}
+				spec.Package = pkg
+				continue
+			}
 			if name, ok := parseContractHeader(trimmed); ok {
 				if !moduleFound {
 					return model.FeatureSpec{}, nil, &domerr.SpecParseError{

@@ -7,6 +7,7 @@ import (
 	appplannewuc "github.com/jitctx/jitctx/internal/application/usecase/plannewuc"
 	appplanuc "github.com/jitctx/jitctx/internal/application/usecase/planuc"
 	appqueryuc "github.com/jitctx/jitctx/internal/application/usecase/queryuc"
+	appscaffolduc "github.com/jitctx/jitctx/internal/application/usecase/scaffolduc"
 	appscanuc "github.com/jitctx/jitctx/internal/application/usecase/scanuc"
 	"github.com/jitctx/jitctx/internal/cli/command"
 	"github.com/jitctx/jitctx/internal/config"
@@ -14,10 +15,12 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/usecase/plannewuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/planuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/queryuc"
+	"github.com/jitctx/jitctx/internal/domain/usecase/scaffolduc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/scanuc"
 	"github.com/jitctx/jitctx/internal/infrastructure/fscontext"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsmanifest"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
+	"github.com/jitctx/jitctx/internal/infrastructure/fsscaffold"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsspec"
 	"github.com/jitctx/jitctx/internal/infrastructure/mdspec"
 	"github.com/jitctx/jitctx/internal/infrastructure/token"
@@ -32,6 +35,7 @@ type Deps struct {
 	Plan        planuc.UseCase
 	PlanNew     plannewuc.UseCase
 	Contracts   contractsuc.UseCase
+	Scaffold    scaffolduc.UseCase
 	WorkDir     string
 	PlansDir    string
 	Logger      *slog.Logger
@@ -69,6 +73,12 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	specFinder := fsspec.NewFinder()
 	mdParser := mdspec.New()
 
+	scaffoldRegistry := fsscaffold.NewRegistry()
+	scaffoldWriter := fsscaffold.NewMultiFileWriter()
+	importResolver := domspecsvc.NewJavaImportResolver(domspecsvc.NewContractPathMapper())
+	endpointSynth := domspecsvc.NewEndpointSynthesizer()
+	idUtils := domspecsvc.NewJavaIdentifierUtils()
+
 	return Deps{
 		ScanFactory: scanFactory,
 		Query:       appqueryuc.New(manifestStore, ctxDiscoverer, estimator, logger),
@@ -85,6 +95,13 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			domspecsvc.NewContractRoleDescriber(),
 			domspecsvc.NewContractTargetResolver(),
 			manifestStore,
+			logger,
+		),
+		Scaffold: appscaffolduc.New(
+			specFinder, mdParser,
+			domspecsvc.NewContractPathMapper(),
+			importResolver, endpointSynth, idUtils,
+			scaffoldRegistry, scaffoldWriter,
 			logger,
 		),
 		WorkDir:  cfg.WorkDir,

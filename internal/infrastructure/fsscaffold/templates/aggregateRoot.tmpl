@@ -1,0 +1,15 @@
+package {{.Package}};
+{{range .Imports}}
+import {{.}};
+{{- end}}
+{{range .ClassAnnotations}}
+{{.}}
+{{- end}}
+public class {{.ClassName}} {
+{{range .Fields}}
+    private {{.}};
+{{- end}}
+
+    public {{.ClassName}}() {
+    }
+}

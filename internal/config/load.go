@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -40,7 +42,11 @@ func Load() (Config, error) {
 		dec.KnownFields(true)
 		var dto configFileDTO
 		if err := dec.Decode(&dto); err != nil {
-			return Config{}, fmt.Errorf("read .jitctx/config.yaml: %w", err)
+			// An empty file (comment-only or zero bytes) returns io.EOF from
+			// Decode. Treat it as "no overrides" and fall through to env vars.
+			if !errors.Is(err, io.EOF) {
+				return Config{}, fmt.Errorf("read .jitctx/config.yaml: %w", err)
+			}
 		}
 		if dto.PlansDir != "" {
 			cfg.PlansDir = dto.PlansDir

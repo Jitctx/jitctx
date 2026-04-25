@@ -1,0 +1,11 @@
+package {{.Package}};
+{{range .Imports}}
+import {{.}};
+{{- end}}
+
+public interface {{.ClassName}} {
+{{- range .Methods}}
+
+    {{.Signature}};
+{{- end}}
+}

@@ -3,6 +3,7 @@ package errors
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -152,6 +153,13 @@ func (e *UnsupportedContractTypeError) Is(target error) bool {
 // EP02US-004 sentinels
 var ErrContractTargetNotFound = errors.New("contract target not found in spec or manifest")
 
+// EP02US-005 sentinels
+var (
+	ErrScaffoldConflict   = errors.New("scaffold conflict: target file already exists")
+	ErrScaffoldRender     = errors.New("scaffold render failed")
+	ErrSpecMissingPackage = errors.New("spec is missing required Package field")
+)
+
 // ContractTargetNotFoundError carries the resolution context so the
 // presentation layer can produce the user-friendly stderr required by the
 // .feature scenario "Contracts slice fails for unknown file".
@@ -170,3 +178,35 @@ func (e *ContractTargetNotFoundError) Error() string {
 func (e *ContractTargetNotFoundError) Is(target error) bool {
 	return target == ErrContractTargetNotFound
 }
+
+// ScaffoldConflictError carries the alphabetically sorted list of conflicting
+// paths so format/errors.go can render them as bullets and so tests can
+// assert them deterministically.
+type ScaffoldConflictError struct {
+	Conflicts []string
+}
+
+func (e *ScaffoldConflictError) Error() string {
+	return "scaffold conflict: target files already exist: " + strings.Join(e.Conflicts, ", ")
+}
+
+func (e *ScaffoldConflictError) Is(target error) bool { return target == ErrScaffoldConflict }
+
+// ScaffoldRenderError carries the offending contract name and the underlying
+// cause (typically a text/template execution error or an
+// UnsupportedContractTypeError surfaced from the renderer).
+type ScaffoldRenderError struct {
+	Contract string
+	Cause    error
+}
+
+func (e *ScaffoldRenderError) Error() string {
+	if e.Cause == nil {
+		return fmt.Sprintf("scaffold render contract %q failed", e.Contract)
+	}
+	return fmt.Sprintf("scaffold render contract %q failed: %s", e.Contract, e.Cause.Error())
+}
+
+func (e *ScaffoldRenderError) Unwrap() error { return e.Cause }
+
+func (e *ScaffoldRenderError) Is(target error) bool { return target == ErrScaffoldRender }

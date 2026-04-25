@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -309,4 +310,57 @@ func TestParser_ParseSpec_CancelledContext(t *testing.T) {
 
 	_, _, err := p.ParseSpec(ctx, "# Feature: f\nModule: m\n")
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestParser_PackageField_Recognized(t *testing.T) {
+	t.Parallel()
+
+	input := "# Feature: x\nModule: m\nPackage: com.example.x\n\n## Contract: Foo\nType: input-port\nMethods:\n- void hello()\n"
+
+	p := mdspec.New()
+	spec, warnings, err := p.ParseSpec(context.Background(), input)
+
+	require.NoError(t, err)
+	require.Empty(t, warnings)
+	require.Equal(t, "x", spec.Feature)
+	require.Equal(t, "m", spec.Module)
+	require.Equal(t, "com.example.x", spec.Package)
+	require.Len(t, spec.Contracts, 1)
+}
+
+func TestParser_PackageField_OptionalAbsence(t *testing.T) {
+	t.Parallel()
+
+	input := "# Feature: x\nModule: m\n\n## Contract: Foo\nType: input-port\nMethods:\n- void hello()\n"
+
+	p := mdspec.New()
+	spec, warnings, err := p.ParseSpec(context.Background(), input)
+
+	require.NoError(t, err)
+	require.Equal(t, "", spec.Package)
+	for _, w := range warnings {
+		require.NotContains(t, w.Message, "Package")
+	}
+}
+
+func TestParser_PackageField_BeforeModule(t *testing.T) {
+	t.Parallel()
+
+	input := "# Feature: x\nPackage: com.example.x\nModule: m\n\n## Contract: Foo\nType: input-port\nMethods:\n- void hello()\n"
+
+	p := mdspec.New()
+	spec, warnings, err := p.ParseSpec(context.Background(), input)
+
+	require.NoError(t, err)
+	require.Equal(t, "com.example.x", spec.Package)
+	require.Equal(t, "m", spec.Module)
+	require.NotEmpty(t, warnings)
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w.Message, "Package") {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected at least one warning mentioning 'Package', got: %v", warnings)
 }
