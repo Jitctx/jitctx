@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -39,10 +40,11 @@ func newScaffoldCmdFor(t *testing.T, workDir string) (*cobra.Command, *bytes.Buf
 	endpointSynth := service.NewEndpointSynthesizer()
 	idUtils := service.NewJavaIdentifierUtils()
 	methodParser := service.NewMethodSignatureParser()
+	jpaAnnotator := service.NewJPAFieldAnnotator()
 	registry := fsscaffold.NewRegistry()
 	testRegistry := fsscaffold.NewTestRegistry()
 	writer := fsscaffold.NewMultiFileWriter()
-	realScaffold := appscaffolduc.New(specFinder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, registry, testRegistry, writer, logger)
+	realScaffold := appscaffolduc.New(specFinder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, jpaAnnotator, registry, testRegistry, writer, logger)
 
 	cmd := command.NewScaffoldCmd(realScaffold, workDir, "", logger)
 
@@ -461,6 +463,266 @@ func TestScaffoldCmd_Integration_AbortsAtomicallyIfTestFileExists(t *testing.T) 
 	require.NoError(t, walkErr)
 	require.Equal(t, []string{preExistingPath}, testFiles,
 		"only the pre-existing test file should be present under src/test/java")
+}
+
+// ── EP02US-008 integration scenarios ──────────────────────────────────────────
+
+// writeInlineSpec writes an inline spec string as <workDir>/jitctx-plans/<feature>.md.
+func writeInlineSpec(t *testing.T, workDir, feature, content string) {
+	t.Helper()
+	destDir := filepath.Join(workDir, "jitctx-plans")
+	require.NoError(t, os.MkdirAll(destDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(destDir, feature+".md"), []byte(content), 0o644))
+}
+
+// TestScaffoldCmd_Integration_EntityJPAAnnotations_UUIDid asserts that an
+// aggregate-root with "UUID id" gets @Id (but NOT @GeneratedValue) and the
+// correct jakarta.persistence imports (EP02US-008, EP02RF-007).
+func TestScaffoldCmd_Integration_EntityJPAAnnotations_UUIDid(t *testing.T) {
+	t.Parallel()
+
+	const uuidSpec = `# Feature: user-uuid
+Module: user-management
+Package: com.app.user
+
+## Contract: User
+Type: aggregate-root
+Fields:
+- UUID id
+- String email
+`
+
+	workDir := t.TempDir()
+	writeInlineSpec(t, workDir, "user-uuid", uuidSpec)
+
+	cmd, _, _ := newScaffoldCmdFor(t, workDir)
+	cmd.SetArgs([]string{"--feature", "user-uuid"})
+	require.NoError(t, cmd.ExecuteContext(context.Background()))
+
+	userJava := filepath.Join(workDir, "src", "main", "java", "com", "app", "user", "domain", "User.java")
+	data, err := os.ReadFile(userJava)
+	require.NoError(t, err, "User.java should exist at %s", userJava)
+	content := string(data)
+
+	require.Contains(t, content, "import jakarta.persistence.Entity;")
+	require.Contains(t, content, "import jakarta.persistence.Id;")
+	require.NotContains(t, content, "jakarta.persistence.GeneratedValue",
+		"UUID id must NOT trigger @GeneratedValue")
+
+	// The line directly above "private UUID id;" must be "    @Id".
+	lines := strings.Split(content, "\n")
+	foundIDField := false
+	for i, line := range lines {
+		if strings.TrimRight(line, " \t") == "    private UUID id;" {
+			require.True(t, i > 0, "@Id annotation line must exist before 'private UUID id;'")
+			require.Equal(t, "    @Id", strings.TrimRight(lines[i-1], " \t"),
+				"line above 'private UUID id;' must be '    @Id'")
+			foundIDField = true
+			break
+		}
+	}
+	require.True(t, foundIDField, "field 'private UUID id;' not found in %s", userJava)
+
+	// The field "private String email;" must have no annotation directly above it.
+	for i, line := range lines {
+		if strings.TrimRight(line, " \t") == "    private String email;" {
+			if i > 0 {
+				above := strings.TrimRight(lines[i-1], " \t")
+				require.False(t, strings.HasPrefix(above, "    @"),
+					"String email must have no annotation; got %q above it", above)
+			}
+			break
+		}
+	}
+}
+
+// TestScaffoldCmd_Integration_EntityJPAAnnotations_Longid asserts that an
+// entity with "Long id" gets @Id AND @GeneratedValue(strategy = GenerationType.IDENTITY)
+// plus the two extra imports (EP02US-008, EP02RF-007).
+func TestScaffoldCmd_Integration_EntityJPAAnnotations_Longid(t *testing.T) {
+	t.Parallel()
+
+	const longSpec = `# Feature: product-long
+Module: product-management
+Package: com.app.product
+
+## Contract: Product
+Type: entity
+Fields:
+- Long id
+- String name
+`
+
+	workDir := t.TempDir()
+	writeInlineSpec(t, workDir, "product-long", longSpec)
+
+	cmd, _, _ := newScaffoldCmdFor(t, workDir)
+	cmd.SetArgs([]string{"--feature", "product-long"})
+	require.NoError(t, cmd.ExecuteContext(context.Background()))
+
+	productJava := filepath.Join(workDir, "src", "main", "java", "com", "app", "product", "domain", "Product.java")
+	data, err := os.ReadFile(productJava)
+	require.NoError(t, err, "Product.java should exist at %s", productJava)
+	content := string(data)
+
+	require.Contains(t, content, "import jakarta.persistence.GeneratedValue;")
+	require.Contains(t, content, "import jakarta.persistence.GenerationType;")
+	require.Contains(t, content, "import jakarta.persistence.Id;")
+
+	// Verify annotation ordering: @Id then @GeneratedValue directly above "private Long id;".
+	lines := strings.Split(content, "\n")
+	foundIDField := false
+	for i, line := range lines {
+		if strings.TrimRight(line, " \t") == "    private Long id;" {
+			require.True(t, i >= 2,
+				"need at least two annotation lines before 'private Long id;'")
+			genVal := strings.TrimRight(lines[i-1], " \t")
+			idAnn := strings.TrimRight(lines[i-2], " \t")
+			require.Equal(t, "    @GeneratedValue(strategy = GenerationType.IDENTITY)", genVal,
+				"line i-1 above 'private Long id;' must be @GeneratedValue annotation")
+			require.Equal(t, "    @Id", idAnn,
+				"line i-2 above 'private Long id;' must be @Id")
+			foundIDField = true
+			break
+		}
+	}
+	require.True(t, foundIDField, "field 'private Long id;' not found in %s", productJava)
+}
+
+// TestScaffoldCmd_Integration_InputPortNoImportsBlankLine asserts that an
+// input-port with no imports produces no import lines AND that the gap
+// between "package ...;" and "public interface ..." is EXACTLY one blank
+// line (Q5 cosmetic guard, EP02US-008). Two blank lines used to leak when
+// the imports slice was empty; the {{- range .Imports}} trim collapses the
+// gap to one.
+func TestScaffoldCmd_Integration_InputPortNoImportsBlankLine(t *testing.T) {
+	t.Parallel()
+
+	// Use a method with no param types and void return so the import resolver
+	// produces an empty imports list.
+	const noImportSpec = `# Feature: simple-port
+Module: simple
+Package: com.app.simple
+
+## Contract: SimpleUseCase
+Type: input-port
+Methods:
+- void execute()
+`
+
+	workDir := t.TempDir()
+	writeInlineSpec(t, workDir, "simple-port", noImportSpec)
+
+	cmd, _, _ := newScaffoldCmdFor(t, workDir)
+	cmd.SetArgs([]string{"--feature", "simple-port"})
+	require.NoError(t, cmd.ExecuteContext(context.Background()))
+
+	portJava := filepath.Join(workDir, "src", "main", "java", "com", "app", "simple", "port", "in", "SimpleUseCase.java")
+	data, err := os.ReadFile(portJava)
+	require.NoError(t, err, "SimpleUseCase.java should exist at %s", portJava)
+	content := string(data)
+
+	// No import lines may appear when the method signature uses only void and
+	// primitive/no-arg forms.
+	require.NotContains(t, content, "import ", "input-port with void execute() must have no import lines")
+
+	// Find the package line and the "public interface" line.
+	lines := strings.Split(content, "\n")
+	pkgIdx := -1
+	ifaceIdx := -1
+	for i, line := range lines {
+		if strings.HasPrefix(line, "package ") {
+			pkgIdx = i
+		}
+		if strings.HasPrefix(line, "public interface ") {
+			ifaceIdx = i
+			break
+		}
+	}
+	require.True(t, pkgIdx >= 0, "package line not found")
+	require.True(t, ifaceIdx > pkgIdx, "public interface line must come after package line")
+
+	// Every line between package and "public interface" must be blank (no
+	// import lines or other stray content).
+	for i := pkgIdx + 1; i < ifaceIdx; i++ {
+		require.Empty(t, strings.TrimSpace(lines[i]),
+			"line %d between package and public interface must be blank; got %q", i+1, lines[i])
+	}
+
+	// EXACTLY one blank line between package and public interface when imports
+	// are empty (cosmetic guard via {{- range .Imports}} trim).
+	require.Equal(t, 2, ifaceIdx-pkgIdx,
+		"expected exactly one blank line between package line and public interface; got %d", ifaceIdx-pkgIdx-1)
+}
+
+// TestScaffoldCmd_Integration_EntityFilesDeterministic asserts that entity files
+// with JPA-annotated fields are byte-identical across two scaffold runs
+// (EP02RNF-002 determinism extended to entity field annotations).
+func TestScaffoldCmd_Integration_EntityFilesDeterministic(t *testing.T) {
+	t.Parallel()
+
+	const detSpec = `# Feature: det-entity
+Module: det-management
+Package: com.app.det
+
+## Contract: Det
+Type: entity
+Fields:
+- Long id
+- String label
+`
+
+	hashEntityFiles := func(workDir string) map[string][sha256.Size]byte {
+		t.Helper()
+		hashes := make(map[string][sha256.Size]byte)
+		srcDir := filepath.Join(workDir, "src")
+		err := filepath.WalkDir(srcDir, func(path string, d os.DirEntry, walkErr error) error {
+			require.NoError(t, walkErr)
+			if d.IsDir() {
+				return nil
+			}
+			f, err := os.Open(path)
+			require.NoError(t, err)
+			defer f.Close()
+			h := sha256.New()
+			_, err = io.Copy(h, f)
+			require.NoError(t, err)
+			var sum [sha256.Size]byte
+			copy(sum[:], h.Sum(nil))
+			hashes[path] = sum
+			return nil
+		})
+		require.NoError(t, err)
+		return hashes
+	}
+
+	workDir1 := t.TempDir()
+	writeInlineSpec(t, workDir1, "det-entity", detSpec)
+	cmd1, _, _ := newScaffoldCmdFor(t, workDir1)
+	cmd1.SetArgs([]string{"--feature", "det-entity"})
+	require.NoError(t, cmd1.ExecuteContext(context.Background()))
+	first := hashEntityFiles(workDir1)
+	require.NotEmpty(t, first)
+
+	workDir2 := t.TempDir()
+	writeInlineSpec(t, workDir2, "det-entity", detSpec)
+	cmd2, _, _ := newScaffoldCmdFor(t, workDir2)
+	cmd2.SetArgs([]string{"--feature", "det-entity"})
+	require.NoError(t, cmd2.ExecuteContext(context.Background()))
+	second := hashEntityFiles(workDir2)
+
+	// Strip workDir prefix and compare by relative paths.
+	rel := func(base string, hashes map[string][sha256.Size]byte) map[string][sha256.Size]byte {
+		out := make(map[string][sha256.Size]byte, len(hashes))
+		for p, h := range hashes {
+			rel, err := filepath.Rel(base, p)
+			require.NoError(t, err)
+			out[rel] = h
+		}
+		return out
+	}
+	require.Equal(t, rel(workDir1, first), rel(workDir2, second),
+		"entity scaffold output must be byte-identical across runs (RNF-002)")
 }
 
 // TestScaffoldCmd_Integration_TestStubsByteIdenticalAcrossRuns asserts that

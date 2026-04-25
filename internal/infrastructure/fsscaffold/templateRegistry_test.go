@@ -71,9 +71,12 @@ func TestTemplateRegistry_Render(t *testing.T) {
 			ContractType:     "entity",
 			Package:          "com.app.user.domain",
 			ClassName:        "User",
-			Imports:          []string{"jakarta.persistence.Entity"},
+			Imports:          []string{"jakarta.persistence.Entity", "jakarta.persistence.GeneratedValue", "jakarta.persistence.GenerationType", "jakarta.persistence.Id"},
 			ClassAnnotations: []string{"@Entity"},
-			Fields:           []string{"Long id", "String email"},
+			Fields: []scaffoldvo.EntityField{
+				{Type: "Long", Name: "id", Annotations: []string{"@Id", "@GeneratedValue(strategy = GenerationType.IDENTITY)"}},
+				{Type: "String", Name: "email", Annotations: nil},
+			},
 		}
 
 		out, err := reg.Render(context.Background(), in)
@@ -86,6 +89,12 @@ func TestTemplateRegistry_Render(t *testing.T) {
 		require.Contains(t, got, "private String email;")
 		require.Contains(t, got, "public User()")
 		require.NotContains(t, got, "@Override")
+		// Verify JPA id annotations appear above the id field.
+		require.Contains(t, got, "@Id")
+		require.Contains(t, got, "@GeneratedValue(strategy = GenerationType.IDENTITY)")
+		idIdx := strings.Index(got, "@Id")
+		fieldIdx := strings.Index(got, "private Long id;")
+		require.Less(t, idIdx, fieldIdx, "@Id must appear before private Long id;")
 	})
 
 	t.Run("AggregateRoot", func(t *testing.T) {
@@ -98,7 +107,10 @@ func TestTemplateRegistry_Render(t *testing.T) {
 			ClassName:        "Order",
 			Imports:          []string{"jakarta.persistence.Entity"},
 			ClassAnnotations: []string{"@Entity"},
-			Fields:           []string{"Long id", "Long customerId"},
+			Fields: []scaffoldvo.EntityField{
+				{Type: "Long", Name: "id", Annotations: nil},
+				{Type: "Long", Name: "customerId", Annotations: nil},
+			},
 		}
 
 		out, err := reg.Render(context.Background(), in)

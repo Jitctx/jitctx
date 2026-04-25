@@ -118,6 +118,110 @@ func TestJavaImportResolver_Resolve(t *testing.T) {
 		require.Contains(t, imports, "jakarta.persistence.Entity")
 	})
 
+	t.Run("EntityLongIdAndStringEmail_AddsIdAndGeneratedValue", func(t *testing.T) {
+		t.Parallel()
+
+		spec := model.FeatureSpec{
+			Feature: "create-user",
+			Module:  "user-management",
+			Package: "com.app.user",
+			Contracts: []model.SpecContract{
+				{
+					Name:   "UserEntity",
+					Type:   model.ContractEntity,
+					Fields: []string{"Long id", "String email"},
+				},
+			},
+		}
+
+		target := spec.Contracts[0]
+		imports, err := resolver.Resolve(spec, target, "com.app.user")
+		require.NoError(t, err)
+
+		require.Contains(t, imports, "jakarta.persistence.Entity")
+		require.Contains(t, imports, "jakarta.persistence.Id")
+		require.Contains(t, imports, "jakarta.persistence.GeneratedValue")
+		require.Contains(t, imports, "jakarta.persistence.GenerationType")
+	})
+
+	t.Run("EntityUUIDId_AddsIdOnly", func(t *testing.T) {
+		t.Parallel()
+
+		spec := model.FeatureSpec{
+			Feature: "create-user",
+			Module:  "user-management",
+			Package: "com.app.user",
+			Contracts: []model.SpecContract{
+				{
+					Name:   "UserEntity",
+					Type:   model.ContractEntity,
+					Fields: []string{"UUID id"},
+				},
+			},
+		}
+
+		target := spec.Contracts[0]
+		imports, err := resolver.Resolve(spec, target, "com.app.user")
+		require.NoError(t, err)
+
+		require.Contains(t, imports, "jakarta.persistence.Entity")
+		require.Contains(t, imports, "jakarta.persistence.Id")
+		require.NotContains(t, imports, "jakarta.persistence.GeneratedValue")
+		require.NotContains(t, imports, "jakarta.persistence.GenerationType")
+	})
+
+	t.Run("EntityStringEmailOnly_NoExtraImports", func(t *testing.T) {
+		t.Parallel()
+
+		spec := model.FeatureSpec{
+			Feature: "create-user",
+			Module:  "user-management",
+			Package: "com.app.user",
+			Contracts: []model.SpecContract{
+				{
+					Name:   "UserEntity",
+					Type:   model.ContractEntity,
+					Fields: []string{"String email"},
+				},
+			},
+		}
+
+		target := spec.Contracts[0]
+		imports, err := resolver.Resolve(spec, target, "com.app.user")
+		require.NoError(t, err)
+
+		require.Contains(t, imports, "jakarta.persistence.Entity")
+		require.NotContains(t, imports, "jakarta.persistence.Id")
+		require.NotContains(t, imports, "jakarta.persistence.GeneratedValue")
+		require.NotContains(t, imports, "jakarta.persistence.GenerationType")
+	})
+
+	t.Run("AggregateRootLongId_AddsIdAndGeneratedValue", func(t *testing.T) {
+		t.Parallel()
+
+		spec := model.FeatureSpec{
+			Feature: "create-order",
+			Module:  "order-management",
+			Package: "com.app.order",
+			Contracts: []model.SpecContract{
+				{
+					Name:   "Order",
+					Type:   model.ContractAggregate,
+					Fields: []string{"Long id"},
+				},
+			},
+		}
+
+		target := spec.Contracts[0]
+		imports, err := resolver.Resolve(spec, target, "com.app.order")
+		require.NoError(t, err)
+
+		require.Contains(t, imports, "jakarta.persistence.Entity")
+		require.Contains(t, imports, "jakarta.persistence.Id")
+		require.Contains(t, imports, "jakarta.persistence.GeneratedValue")
+		require.Contains(t, imports, "jakarta.persistence.GenerationType")
+	})
+
 	t.Run("JpaAdapter", func(t *testing.T) {
 		t.Parallel()
 

@@ -32,6 +32,7 @@ type Impl struct {
 	endpointSynth  service.EndpointSynthesizer
 	idUtils        service.JavaIdentifierUtils
 	methodParser   service.MethodSignatureParser
+	jpaAnnotator   service.JPAFieldAnnotator
 	renderer       spec.RenderProductionTemplatePort
 	testRenderer   spec.RenderTestTemplatePort
 	writer         spec.WriteProductionFilesPort
@@ -48,6 +49,7 @@ func New(
 	endpointSynth service.EndpointSynthesizer,
 	idUtils service.JavaIdentifierUtils,
 	methodParser service.MethodSignatureParser,
+	jpaAnnotator service.JPAFieldAnnotator,
 	renderer spec.RenderProductionTemplatePort,
 	testRenderer spec.RenderTestTemplatePort,
 	writer spec.WriteProductionFilesPort,
@@ -62,6 +64,7 @@ func New(
 		endpointSynth:  endpointSynth,
 		idUtils:        idUtils,
 		methodParser:   methodParser,
+		jpaAnnotator:   jpaAnnotator,
 		renderer:       renderer,
 		testRenderer:   testRenderer,
 		writer:         writer,
@@ -286,7 +289,7 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 			Imports:          imports,
 			ClassAnnotations: classAnnotations,
 			Implements:       implementsName,
-			Fields:           append([]string(nil), c.Fields...),
+			Fields:           u.jpaAnnotator.Annotate(c.Fields),
 			Methods:          methods,
 			Endpoints:        endpoints,
 			Dependencies:     deps,

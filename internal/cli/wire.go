@@ -81,6 +81,7 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	idUtils := domspecsvc.NewJavaIdentifierUtils()
 	testMapper := domspecsvc.NewTestPathMapper()
 	methodParser := domspecsvc.NewMethodSignatureParser()
+	jpaAnnotator := domspecsvc.NewJPAFieldAnnotator()
 
 	return Deps{
 		ScanFactory: scanFactory,
@@ -109,6 +110,7 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			endpointSynth,
 			idUtils,
 			methodParser,
+			jpaAnnotator,
 			scaffoldRegistry,
 			scaffoldTestRegistry,
 			scaffoldWriter,

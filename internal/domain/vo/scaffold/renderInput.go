@@ -17,7 +17,10 @@ package scaffold
 //	                already prefixed with '@'; framework + spec-declared, deduped.
 //	Implements      simple type name the class implements (services only); ""
 //	                when not applicable.
-//	Fields          declarations as written in the spec (e.g., "UUID id").
+//	Fields          typed declarations (Type, Name, JPA annotations) computed by
+//	                service.JPAFieldAnnotator from the spec's raw `Type Name` strings.
+//	                Empty when the contract type does not declare fields (services,
+//	                rest-adapters, ports).
 //	Methods         interface-method declarations (input-port / output-port)
 //	                OR @Override stubs (service / jpa-adapter); rendered as-is
 //	                plus a "throw new UnsupportedOperationException(...)" body
@@ -31,7 +34,7 @@ type RenderInput struct {
 	Imports          []string
 	ClassAnnotations []string
 	Implements       string
-	Fields           []string
+	Fields           []EntityField
 	Methods          []RenderedMethod
 	Endpoints        []RenderedEndpoint
 	Dependencies     []ConstructorDep

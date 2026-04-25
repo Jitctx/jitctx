@@ -7,9 +7,11 @@ import {{.}};
 {{- end}}
 public class {{.ClassName}} {
 {{range .Fields}}
-    private {{.}};
+{{- range .Annotations}}
+    {{.}}
 {{- end}}
-
+    private {{.Type}} {{.Name}};
+{{end}}
     public {{.ClassName}}() {
     }
 }

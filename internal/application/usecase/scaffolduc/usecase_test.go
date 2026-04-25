@@ -188,7 +188,8 @@ func newUC(
 	endpointSynth := service.NewEndpointSynthesizer()
 	idUtils := service.NewJavaIdentifierUtils()
 	methodParser := service.NewMethodSignatureParser()
-	return scaffolduc.New(finder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, renderer, testRenderer, writer, logger)
+	jpaAnnotator := service.NewJPAFieldAnnotator()
+	return scaffolduc.New(finder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, jpaAnnotator, renderer, testRenderer, writer, logger)
 }
 
 // ─── Existing Tests ───────────────────────────────────────────────────────────
@@ -862,4 +863,92 @@ func TestScaffoldUseCase_MethodNameFreeze(t *testing.T) {
 	require.Len(t, serviceTestInput.TestMethods, 1)
 	require.Equal(t, "execute_shouldDoSomething", serviceTestInput.TestMethods[0].Name)
 	require.Equal(t, "// TODO: implement test", serviceTestInput.TestMethods[0].Body)
+}
+
+// TestScaffoldUseCase_Entity_FieldsAnnotated asserts that the RenderInput.Fields
+// passed to the renderer for an entity contract contains typed EntityField values
+// with the expected JPA annotations.
+// Covers: "Long id" → @Id + @GeneratedValue; "String email" → no annotations.
+func TestScaffoldUseCase_Entity_FieldsAnnotated(t *testing.T) {
+	t.Parallel()
+
+	spec := model.FeatureSpec{
+		Feature: "order",
+		Module:  "order",
+		Package: "com.app.order",
+		Contracts: []model.SpecContract{
+			{
+				Name:   "Order",
+				Type:   model.ContractEntity,
+				Fields: []string{"Long id", "String email"},
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "order",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, renderer.captured, 1)
+	entityInput := renderer.captured[0]
+	require.Equal(t, "Order", entityInput.ClassName)
+
+	// Fields must be typed EntityField values.
+	require.Len(t, entityInput.Fields, 2)
+
+	// Fields[0]: Long id → @Id + @GeneratedValue.
+	f0 := entityInput.Fields[0]
+	require.Equal(t, "Long", f0.Type)
+	require.Equal(t, "id", f0.Name)
+	require.Equal(t, []string{
+		"@Id",
+		"@GeneratedValue(strategy = GenerationType.IDENTITY)",
+	}, f0.Annotations)
+
+	// Fields[1]: String email → no annotations.
+	f1 := entityInput.Fields[1]
+	require.Equal(t, "String", f1.Type)
+	require.Equal(t, "email", f1.Name)
+	require.Nil(t, f1.Annotations)
+}
+
+// TestScaffoldUseCase_Service_FieldsNil asserts that the RenderInput.Fields
+// passed to the renderer for a non-entity contract (service) is nil.
+func TestScaffoldUseCase_Service_FieldsNil(t *testing.T) {
+	t.Parallel()
+
+	spec := model.FeatureSpec{
+		Feature: "create-user",
+		Module:  "user",
+		Package: "com.app.user",
+		Contracts: []model.SpecContract{
+			{
+				Name: "UserServiceImpl",
+				Type: model.ContractService,
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, renderer.captured, 1)
+	serviceInput := renderer.captured[0]
+	require.Equal(t, "UserServiceImpl", serviceInput.ClassName)
+	require.Nil(t, serviceInput.Fields)
 }

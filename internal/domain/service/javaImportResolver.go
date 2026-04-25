@@ -22,6 +22,10 @@ import (
 //     rest-adapter   → "org.springframework.web.bind.annotation.RestController"
 //     + per-endpoint VERB-mapping import (GetMapping, …)
 //     entity / aggregate-root → "jakarta.persistence.Entity"
+//     3a. For entity / aggregate-root: consult NewJPAFieldAnnotator() predicates
+//     to add "jakarta.persistence.Id" when any field is id-named, and
+//     "jakarta.persistence.GeneratedValue" + "jakarta.persistence.GenerationType"
+//     when that id field has type Long.
 //     jpa-adapter    → "org.springframework.stereotype.Repository"
 //  4. External names (not in spec) are ignored — the use case logs them as
 //     warnings; the resolver does NOT fabricate FQNs.
@@ -113,10 +117,16 @@ func (r JavaImportResolver) Resolve(spec model.FeatureSpec, target model.SpecCon
 			annotationName := strings.ToUpper(eb.Verb[:1]) + strings.ToLower(eb.Verb[1:]) + "Mapping"
 			seen["org.springframework.web.bind.annotation."+annotationName] = struct{}{}
 		}
-	case model.ContractEntity:
+	case model.ContractEntity, model.ContractAggregate:
 		seen["jakarta.persistence.Entity"] = struct{}{}
-	case model.ContractAggregate:
-		seen["jakarta.persistence.Entity"] = struct{}{}
+		annotator := NewJPAFieldAnnotator()
+		if annotator.HasIDField(target.Fields) {
+			seen["jakarta.persistence.Id"] = struct{}{}
+		}
+		if annotator.HasGeneratedValueField(target.Fields) {
+			seen["jakarta.persistence.GeneratedValue"] = struct{}{}
+			seen["jakarta.persistence.GenerationType"] = struct{}{}
+		}
 	case model.ContractJPAAdapter:
 		seen["org.springframework.stereotype.Repository"] = struct{}{}
 	}
