@@ -23,6 +23,10 @@ func TranslateError(err error) error {
 	case errors.Is(err, domerr.ErrManifestNotFound):
 		return fmt.Errorf("project-state.yaml not found; run 'jitctx scan' first")
 	}
+	var existsErr *domerr.SpecFileExistsError
+	if errors.As(err, &existsErr) {
+		return fmt.Errorf("spec file already exists: %s", existsErr.Path)
+	}
 	var mnf *domerr.ModuleNotFoundError
 	if errors.As(err, &mnf) {
 		return fmt.Errorf("module %q not found; available modules: %s",

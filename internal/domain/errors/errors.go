@@ -19,6 +19,10 @@ var (
 
 	// US-001 (spec parser) sentinels
 	ErrSpecParse = errors.New("spec parse error") // sentinel for all fatal spec parse errors
+
+	// EP02US-002 sentinels
+	ErrSpecFileExists  = errors.New("spec file already exists")
+	ErrSpecWriteFailed = errors.New("spec template write failed")
 )
 
 type ProfileConflictError struct {
@@ -92,4 +96,19 @@ func (e *DuplicateContractError) Error() string {
 
 func (e *DuplicateContractError) Is(target error) bool {
 	return target == ErrSpecParse
+}
+
+// SpecFileExistsError carries the conflicting path so the presentation
+// layer can echo it to stderr verbatim (matches the EP02US-002 acceptance
+// criterion: stderr contains "spec file already exists").
+type SpecFileExistsError struct {
+	Path string
+}
+
+func (e *SpecFileExistsError) Error() string {
+	return fmt.Sprintf("spec file already exists: %s", e.Path)
+}
+
+func (e *SpecFileExistsError) Is(target error) bool {
+	return target == ErrSpecFileExists
 }
