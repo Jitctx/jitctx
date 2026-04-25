@@ -8,6 +8,7 @@ type profileDTO struct {
 	Detect          detectDTO          `yaml:"detect"`
 	ModuleDetection moduleDetectionDTO `yaml:"module_detection"`
 	Rules           []ruleDTO          `yaml:"rules"`
+	AuditRules      []auditRuleDTO     `yaml:"audit_rules"`
 }
 
 type detectDTO struct {
@@ -33,6 +34,15 @@ type markerDTO struct {
 type ruleDTO struct {
 	Match      matchDTO `yaml:"match"`
 	ClassifyAs string   `yaml:"classify_as"`
+}
+
+type auditRuleDTO struct {
+	ID          string            `yaml:"id"`
+	Kind        string            `yaml:"kind"`
+	Severity    string            `yaml:"severity"`
+	Description string            `yaml:"description"`
+	Suggestion  string            `yaml:"suggestion"`
+	Params      map[string]string `yaml:"params"`
 }
 
 type matchDTO struct {

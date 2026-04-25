@@ -1,0 +1,37 @@
+generated_at: 2026-04-25T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: user
+    path: src/main/java/com/app/user
+    tags: []
+    contracts:
+      - name: User
+        type: entity
+        path: src/main/java/com/app/user/domain/User.java
+        methods: []
+      - name: CreateUserUseCase
+        type: input-port
+        path: src/main/java/com/app/user/port/in/CreateUserUseCase.java
+        methods:
+          - signature: User execute(String name, String email)
+      - name: UserRepository
+        type: output-port
+        path: src/main/java/com/app/user/port/out/UserRepository.java
+        methods:
+          - signature: Optional<User> findById(Long id)
+          - signature: User save(User user)
+      - name: CreateUserService
+        type: service
+        path: src/main/java/com/app/user/service/CreateUserService.java
+        methods:
+          - signature: User execute(String name, String email)
+      - name: UserController
+        type: rest-adapter
+        path: src/main/java/com/app/user/adapter/in/web/UserController.java
+        methods: []
+    dependencies: []
+contexts: []

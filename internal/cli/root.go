@@ -20,6 +20,7 @@ func NewRootCmd(d Deps) *cobra.Command {
 		command.NewContractsCmd(d.Contracts, d.WorkDir, d.PlansDir, d.Logger),
 		command.NewScaffoldCmd(d.Scaffold, d.WorkDir, d.PlansDir, d.Logger),
 		command.NewListCmd(d.Query, d.Logger),
+		command.NewAuditCmd(d.Audit, d.Logger),
 	)
 	return root
 }

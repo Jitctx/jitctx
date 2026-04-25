@@ -3,6 +3,7 @@ package cli
 import (
 	"log/slog"
 
+	appaudituc "github.com/jitctx/jitctx/internal/application/usecase/audituc"
 	appcontractsuc "github.com/jitctx/jitctx/internal/application/usecase/contractsuc"
 	appplannewuc "github.com/jitctx/jitctx/internal/application/usecase/plannewuc"
 	appplanuc "github.com/jitctx/jitctx/internal/application/usecase/planuc"
@@ -11,6 +12,7 @@ import (
 	appscanuc "github.com/jitctx/jitctx/internal/application/usecase/scanuc"
 	"github.com/jitctx/jitctx/internal/cli/command"
 	"github.com/jitctx/jitctx/internal/config"
+	"github.com/jitctx/jitctx/internal/domain/usecase/audituc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/contractsuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/plannewuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/planuc"
@@ -36,6 +38,7 @@ type Deps struct {
 	PlanNew     plannewuc.UseCase
 	Contracts   contractsuc.UseCase
 	Scaffold    scaffolduc.UseCase
+	Audit       audituc.UseCase
 	WorkDir     string
 	PlansDir    string
 	Logger      *slog.Logger
@@ -83,6 +86,9 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	methodParser := domspecsvc.NewMethodSignatureParser()
 	jpaAnnotator := domspecsvc.NewJPAFieldAnnotator()
 
+	auditRulesLoader := fsprofile.NewAuditRulesLoader(cfg.ProfilesDir, logger)
+	auditEvaluator := domspecsvc.NewAuditEvaluator()
+
 	return Deps{
 		ScanFactory: scanFactory,
 		Query:       appqueryuc.New(manifestStore, ctxDiscoverer, estimator, logger),
@@ -114,6 +120,16 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			scaffoldRegistry,
 			scaffoldTestRegistry,
 			scaffoldWriter,
+			logger,
+		),
+		Audit: appaudituc.New(
+			manifestStore,    // manifest.LoadManifestPort
+			profileDetector,  // profile.DetectProfilePort
+			auditRulesLoader, // profile.LoadAuditRulesPort
+			tsWalker,         // parser.WalkJavaFilesPort
+			tsParser,         // parser.ParseJavaFilePort
+			tsParser,         // parser.ListJavaFieldsPort (same *Parser satisfies both)
+			auditEvaluator,
 			logger,
 		),
 		WorkDir:  cfg.WorkDir,

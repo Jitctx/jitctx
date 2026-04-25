@@ -9,6 +9,14 @@ type JavaFileSummary struct {
 	HasErrors    bool // true if Tree-sitter reported ERROR nodes
 }
 
+// JavaField represents one field declared in a class body. Used by audit
+// rule kind field_type_layer_violation. Empty slice when the declaration
+// is not a class or has no fields.
+type JavaField struct {
+	Name string // field identifier, e.g. "repository"
+	Type string // raw type token as it appears in source, e.g. "UserRepositoryJpa" or "List<User>"
+}
+
 // JavaDeclaration represents a top-level type declaration in a Java file.
 type JavaDeclaration struct {
 	NodeType             string       // "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"
@@ -18,6 +26,7 @@ type JavaDeclaration struct {
 	Implements           []string     // simple and/or qualified interface names
 	Extends              []string     // superclass simple or qualified name (length 0 or 1)
 	Methods              []JavaMethod // class/interface-owned methods
+	Fields               []JavaField  // NEW — empty for non-class declarations and for classes with no fields
 }
 
 // JavaMethod represents a method extracted from a Java declaration.

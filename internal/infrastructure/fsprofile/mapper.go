@@ -7,6 +7,22 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/model"
 )
 
+// knownAuditRuleKinds is the set of recognised AuditRuleKind values.
+var knownAuditRuleKinds = map[model.AuditRuleKind]bool{
+	model.AuditKindAnnotationPathMismatch:  true,
+	model.AuditKindImplementsPathMismatch:  true,
+	model.AuditKindInterfaceNaming:         true,
+	model.AuditKindForbiddenImport:         true,
+	model.AuditKindFieldTypeLayerViolation: true,
+}
+
+// knownAuditSeverities is the set of recognised AuditSeverity values.
+var knownAuditSeverities = map[model.AuditSeverity]bool{
+	model.AuditSeverityError:   true,
+	model.AuditSeverityWarning: true,
+	model.AuditSeverityInfo:    true,
+}
+
 // toDomain converts a profileDTO to a model.FrameworkProfile, validating required fields.
 func toDomain(d profileDTO) (*model.FrameworkProfile, error) {
 	if d.Name == "" {

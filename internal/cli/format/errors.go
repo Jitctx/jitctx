@@ -21,6 +21,7 @@ func TranslateError(err error) error {
 		return fmt.Errorf("failed to write project-state.yaml: %w; check filesystem permissions on the target directory", err)
 	case errors.Is(err, domerr.ErrParseFailure):
 		return fmt.Errorf("fatal java parse failure: %w", err)
+	// ErrManifestNotFound is also relied on by EP03US-002 (jitctx audit).
 	case errors.Is(err, domerr.ErrManifestNotFound):
 		return fmt.Errorf("project-state.yaml not found; run 'jitctx scan' first")
 	}

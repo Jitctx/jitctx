@@ -41,4 +41,7 @@ const (
 	nodeBooleanType       = "boolean_type"
 	nodeArrayType         = "array_type"
 	nodeGenericType       = "generic_type"
+
+	nodeFieldDecl          = "field_declaration"
+	nodeVariableDeclarator = "variable_declarator"
 )

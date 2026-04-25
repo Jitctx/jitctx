@@ -160,6 +160,28 @@ var (
 	ErrSpecMissingPackage = errors.New("spec is missing required Package field")
 )
 
+// EP03US-002 sentinels
+var (
+	ErrAuditProfileMissing = errors.New("active profile has no audit rules")
+)
+
+// AuditUnknownRuleKindError is raised when a profile YAML declares a rule
+// kind the running jitctx binary does not know about. Surfaced as a
+// warning by the use case (logged to stderr, rule skipped); never fails
+// the audit. Wraps ErrProfileInvalid for errors.Is matching.
+type AuditUnknownRuleKindError struct {
+	RuleID string
+	Kind   string
+}
+
+func (e *AuditUnknownRuleKindError) Error() string {
+	return fmt.Sprintf("audit rule %q: unknown kind %q", e.RuleID, e.Kind)
+}
+
+func (e *AuditUnknownRuleKindError) Is(target error) bool {
+	return errors.Is(target, ErrProfileInvalid)
+}
+
 // ContractTargetNotFoundError carries the resolution context so the
 // presentation layer can produce the user-friendly stderr required by the
 // .feature scenario "Contracts slice fails for unknown file".

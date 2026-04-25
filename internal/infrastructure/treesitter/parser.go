@@ -200,6 +200,7 @@ func extractClassDeclaration(node *sitter.Node, src []byte) model.JavaDeclaratio
 			decl.Implements = extractTypeList(child, src)
 		case nodeClassBody:
 			decl.Methods = extractMethods(child, src)
+			decl.Fields = extractFields(child, src)
 		}
 	}
 	return decl
