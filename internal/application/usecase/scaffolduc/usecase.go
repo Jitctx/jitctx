@@ -220,23 +220,31 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 			implTarget, found := contractIndex[c.Implements]
 			if found && c.Implements != "" {
 				for _, m := range implTarget.Methods {
+					pm, perr := u.methodParser.Parse(m)
+					if perr != nil {
+						return scaffoldvo.ScaffoldOutput{}, &domerr.ScaffoldRenderError{Contract: c.Name, Cause: perr}
+					}
 					methods = append(methods, scaffoldvo.RenderedMethod{
 						Signature: m,
 						Override:  true,
-						Body:      `throw new UnsupportedOperationException("Not yet implemented");`,
+						Body:      buildMethodBody(c.Name, pm.Name, pm.ReturnType),
 					})
 				}
 			} else {
-				// Fallback: emit c.Methods with throw body but WITHOUT @Override.
+				// Fallback: emit c.Methods with TODO body but WITHOUT @Override.
 				u.logger.Warn("implements target not found",
 					slog.String("name", c.Name),
 					slog.String("target", c.Implements),
 				)
 				for _, m := range c.Methods {
+					pm, perr := u.methodParser.Parse(m)
+					if perr != nil {
+						return scaffoldvo.ScaffoldOutput{}, &domerr.ScaffoldRenderError{Contract: c.Name, Cause: perr}
+					}
 					methods = append(methods, scaffoldvo.RenderedMethod{
 						Signature: m,
 						Override:  false,
-						Body:      `throw new UnsupportedOperationException("Not yet implemented");`,
+						Body:      buildMethodBody(c.Name, pm.Name, pm.ReturnType),
 					})
 				}
 			}
@@ -256,7 +264,12 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 				endpoints = append(endpoints, scaffoldvo.RenderedEndpoint{
 					Annotation: eb.Annotation,
 					Method:     eb.MethodName,
-					Body:       `throw new UnsupportedOperationException("Not yet implemented");`,
+					// restAdapter.tmpl renders endpoints with `public Object <method>()`,
+					// never void, so the returnType is hard-coded to "Object" here so the
+					// throw line is always emitted. Keeping the same helper gives format
+					// consistency with service / jpa-adapter (US-001 acceptance scenario
+					// "TODO format is consistent across types").
+					Body: buildMethodBody(c.Name, eb.MethodName, "Object"),
 				})
 			}
 		}
@@ -522,4 +535,33 @@ func dedupStrings(in []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// buildMethodBody returns the body string for a class-method stub. The
+// returned string is dropped verbatim into the {{.Body}} action of the
+// service / jpa-adapter / rest-adapter template, which precedes it with
+// 8 spaces of indentation. When the body is multi-line, every line AFTER
+// the first must be prefixed with 8 spaces (the template only indents the
+// first line) so that the rendered Java source has each statement at the
+// expected method-body indent.
+//
+// Format:
+//
+//	"// TODO(jitctx): implement <ClassName>.<methodName>"
+//	"        throw new UnsupportedOperationException(\"Not yet implemented\");"   // omitted when returnType == "void"
+//
+// Inputs:
+//
+//	className   — contract class name (e.g. "UserServiceImpl"). Required.
+//	methodName  — Java method identifier (e.g. "execute"). Required.
+//	returnType  — Java return-type token, lowercase-comparable. Pass "void"
+//	              to omit the throw line. Pass "" or any other type to keep it.
+//
+// The function is total — never returns an error and never panics.
+func buildMethodBody(className, methodName, returnType string) string {
+	todo := "// TODO(jitctx): implement " + className + "." + methodName
+	if returnType == "void" {
+		return todo
+	}
+	return todo + "\n        throw new UnsupportedOperationException(\"Not yet implemented\");"
 }

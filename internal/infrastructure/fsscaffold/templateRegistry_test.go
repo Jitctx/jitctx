@@ -147,7 +147,7 @@ func TestTemplateRegistry_Render(t *testing.T) {
 				{
 					Signature: "UserResponse execute(CreateUserCommand cmd)",
 					Override:  true,
-					Body:      `throw new UnsupportedOperationException("Not yet implemented");`,
+					Body:      "// TODO(jitctx): implement UserServiceImpl.execute\n        throw new UnsupportedOperationException(\"Not yet implemented\");",
 				},
 			},
 		}
@@ -163,6 +163,7 @@ func TestTemplateRegistry_Render(t *testing.T) {
 		require.Contains(t, got, "this.userRepository = userRepository;")
 		require.Contains(t, got, "@Override")
 		require.Contains(t, got, "public UserResponse execute(CreateUserCommand cmd)")
+		require.Contains(t, got, "// TODO(jitctx): implement UserServiceImpl.execute")
 		require.Contains(t, got, `throw new UnsupportedOperationException("Not yet implemented");`)
 		require.Contains(t, got, "import com.app.user.port.in.CreateUserUseCase;")
 	})
@@ -188,7 +189,7 @@ func TestTemplateRegistry_Render(t *testing.T) {
 				{
 					Annotation: `@PostMapping("/users")`,
 					Method:     "postUsers",
-					Body:       `throw new UnsupportedOperationException("Not yet implemented");`,
+					Body:       "// TODO(jitctx): implement UserController.postUsers\n        throw new UnsupportedOperationException(\"Not yet implemented\");",
 				},
 			},
 		}
@@ -202,6 +203,7 @@ func TestTemplateRegistry_Render(t *testing.T) {
 		require.Contains(t, got, "private final CreateUserUseCase createUserUseCase;")
 		require.Contains(t, got, `@PostMapping("/users")`)
 		require.Contains(t, got, "public Object postUsers()")
+		require.Contains(t, got, "// TODO(jitctx): implement UserController.postUsers")
 		require.Contains(t, got, `throw new UnsupportedOperationException(`)
 	})
 
@@ -221,7 +223,7 @@ func TestTemplateRegistry_Render(t *testing.T) {
 				{
 					Signature: "Optional<User> findById(Long id)",
 					Override:  true,
-					Body:      `throw new UnsupportedOperationException("Not yet implemented");`,
+					Body:      "// TODO(jitctx): implement UserJpaAdapter.findById\n        throw new UnsupportedOperationException(\"Not yet implemented\");",
 				},
 			},
 		}
@@ -233,7 +235,67 @@ func TestTemplateRegistry_Render(t *testing.T) {
 		require.Contains(t, got, "@Repository")
 		require.Contains(t, got, "implements UserRepository")
 		require.Contains(t, got, "@Override")
+		require.Contains(t, got, "// TODO(jitctx): implement UserJpaAdapter.findById")
 		require.Contains(t, got, `throw new UnsupportedOperationException("Not yet implemented");`)
+	})
+
+	t.Run("Service_TODOLineRendersAtBodyIndent", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewRegistry()
+		in := scaffoldvo.RenderInput{
+			ContractType: "service",
+			Package:      "com.app.foo.application",
+			ClassName:    "FooServiceImpl",
+			Imports:      []string{},
+			Methods: []scaffoldvo.RenderedMethod{
+				{
+					Signature: "Object bar()",
+					Override:  false,
+					Body:      "// TODO(jitctx): implement Foo.bar\n        throw new UnsupportedOperationException(\"Not yet implemented\");",
+				},
+			},
+		}
+
+		out, err := reg.Render(context.Background(), in)
+		require.NoError(t, err)
+
+		got := string(out)
+		// Template prefixes the first line with 8 spaces; the body string itself
+		// carries 8-space indent on the continuation line.
+		require.Contains(t, got, "        // TODO(jitctx): implement Foo.bar")
+		require.Contains(t, got, "        throw new UnsupportedOperationException(")
+		// Both lines must appear inside the same method body.
+		todoIdx := strings.Index(got, "        // TODO(jitctx): implement Foo.bar")
+		throwIdx := strings.Index(got, "        throw new UnsupportedOperationException(")
+		require.True(t, todoIdx >= 0 && throwIdx > todoIdx,
+			"TODO line must appear before throw line in rendered output; got:\n%s", got)
+	})
+
+	t.Run("Service_VoidMethodBodyHasNoThrow", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewRegistry()
+		in := scaffoldvo.RenderInput{
+			ContractType: "service",
+			Package:      "com.app.foo.application",
+			ClassName:    "FooServiceImpl",
+			Imports:      []string{},
+			Methods: []scaffoldvo.RenderedMethod{
+				{
+					Signature: "void deleteById(Long id)",
+					Override:  false,
+					Body:      "// TODO(jitctx): implement FooServiceImpl.deleteById",
+				},
+			},
+		}
+
+		out, err := reg.Render(context.Background(), in)
+		require.NoError(t, err)
+
+		got := string(out)
+		require.Contains(t, got, "// TODO(jitctx): implement FooServiceImpl.deleteById")
+		require.NotContains(t, got, "throw new UnsupportedOperationException")
 	})
 
 	t.Run("UnsupportedType_ReturnsTypedError", func(t *testing.T) {

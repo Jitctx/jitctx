@@ -404,6 +404,12 @@ func TestScaffoldUseCase_OverrideMethodsForServiceFromImplementsTarget(t *testin
 	require.Equal(t, "UserResponse execute(CreateUserCommand cmd)", m.Signature)
 	require.True(t, m.Override)
 	require.Contains(t, m.Body, "throw new UnsupportedOperationException")
+	require.Contains(t, m.Body, "// TODO(jitctx): implement UserServiceImpl.execute")
+	// TODO line precedes the throw line.
+	todoIdx := strings.Index(m.Body, "// TODO(jitctx):")
+	throwIdx := strings.Index(m.Body, "throw new UnsupportedOperationException")
+	require.True(t, todoIdx >= 0 && throwIdx > todoIdx,
+		"TODO must appear before throw in body; got %q", m.Body)
 }
 
 func TestScaffoldUseCase_EndpointsForRestAdapter(t *testing.T) {
@@ -951,4 +957,220 @@ func TestScaffoldUseCase_Service_FieldsNil(t *testing.T) {
 	serviceInput := renderer.captured[0]
 	require.Equal(t, "UserServiceImpl", serviceInput.ClassName)
 	require.Nil(t, serviceInput.Fields)
+}
+
+// ─── EP03US-001 TODO stub tests (T6-G1) ──────────────────────────────────────
+
+// TestScaffoldUseCase_TODOIncludesPerMethodName verifies that each rendered
+// method body contains a TODO comment that includes the method's own name.
+func TestScaffoldUseCase_TODOIncludesPerMethodName(t *testing.T) {
+	t.Parallel()
+
+	// Spec: an output-port with two methods and a jpa-adapter that implements it.
+	spec := model.FeatureSpec{
+		Feature: "create-user",
+		Module:  "user",
+		Package: "com.app.user",
+		Contracts: []model.SpecContract{
+			{
+				Name:    "UserRepository",
+				Type:    model.ContractOutputPort,
+				Methods: []string{"User foo(Long id)", "User bar(String name)"},
+			},
+			{
+				Name:       "UserJpaAdapter",
+				Type:       model.ContractJPAAdapter,
+				Implements: "UserRepository",
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	// UserJpaAdapter is captured at index 1 (second contract).
+	require.Len(t, renderer.captured, 2)
+	adapterInput := renderer.captured[1]
+	require.Equal(t, "UserJpaAdapter", adapterInput.ClassName)
+	require.Len(t, adapterInput.Methods, 2)
+
+	require.Contains(t, adapterInput.Methods[0].Body, "// TODO(jitctx): implement UserJpaAdapter.foo")
+	require.Contains(t, adapterInput.Methods[1].Body, "// TODO(jitctx): implement UserJpaAdapter.bar")
+}
+
+// TestScaffoldUseCase_VoidMethodOmitsThrow verifies that a method with return
+// type "void" emits the TODO comment but NOT the throw statement.
+func TestScaffoldUseCase_VoidMethodOmitsThrow(t *testing.T) {
+	t.Parallel()
+
+	spec := model.FeatureSpec{
+		Feature: "delete-user",
+		Module:  "user",
+		Package: "com.app.user",
+		Contracts: []model.SpecContract{
+			{
+				Name:    "UserRepository",
+				Type:    model.ContractOutputPort,
+				Methods: []string{"void deleteById(Long id)"},
+			},
+			{
+				Name:       "UserJpaAdapter",
+				Type:       model.ContractJPAAdapter,
+				Implements: "UserRepository",
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "delete-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, renderer.captured, 2)
+	adapterInput := renderer.captured[1]
+	require.Equal(t, "UserJpaAdapter", adapterInput.ClassName)
+	require.Len(t, adapterInput.Methods, 1)
+	m := adapterInput.Methods[0]
+
+	require.Contains(t, m.Body, "// TODO(jitctx): implement UserJpaAdapter.deleteById")
+	require.NotContains(t, m.Body, "throw new UnsupportedOperationException")
+}
+
+// TestScaffoldUseCase_TODOFormatConsistentAcrossTypes verifies that both the
+// service contract and the rest-adapter contract emit TODO comments in the
+// same format, and that both include the throw for non-void methods.
+func TestScaffoldUseCase_TODOFormatConsistentAcrossTypes(t *testing.T) {
+	t.Parallel()
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, renderer.captured, 4)
+
+	// Service contract (index 2): UserServiceImpl.execute
+	serviceInput := renderer.captured[2]
+	require.Equal(t, "UserServiceImpl", serviceInput.ClassName)
+	require.Len(t, serviceInput.Methods, 1)
+	serviceBody := serviceInput.Methods[0].Body
+	require.Contains(t, serviceBody, "// TODO(jitctx): implement UserServiceImpl.execute")
+	require.Contains(t, serviceBody, "throw new UnsupportedOperationException")
+
+	// Rest-adapter contract (index 3): UserController.postUsers
+	controllerInput := renderer.captured[3]
+	require.Equal(t, "UserController", controllerInput.ClassName)
+	require.Len(t, controllerInput.Endpoints, 1)
+	endpointBody := controllerInput.Endpoints[0].Body
+	require.Contains(t, endpointBody, "// TODO(jitctx): implement UserController.postUsers")
+	require.Contains(t, endpointBody, "throw new UnsupportedOperationException")
+}
+
+// TestScaffoldUseCase_TODOEmittedInFallbackBranch verifies that when a
+// service's Implements target is not found in the contract index, the fallback
+// branch still emits a TODO comment using the service's own class name.
+func TestScaffoldUseCase_TODOEmittedInFallbackBranch(t *testing.T) {
+	t.Parallel()
+
+	// Service whose Implements references a name not present in the spec.
+	spec := model.FeatureSpec{
+		Feature: "create-user",
+		Module:  "user",
+		Package: "com.app.user",
+		Contracts: []model.SpecContract{
+			{
+				Name:       "UserServiceImpl",
+				Type:       model.ContractService,
+				Implements: "NonExistentPort", // not in contractIndex
+				Methods:    []string{"UserResponse execute(CreateUserCommand cmd)"},
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, renderer.captured, 1)
+	serviceInput := renderer.captured[0]
+	require.Equal(t, "UserServiceImpl", serviceInput.ClassName)
+	require.Len(t, serviceInput.Methods, 1)
+
+	// Fallback branch must emit TODO with the service's own class name.
+	m := serviceInput.Methods[0]
+	require.Contains(t, m.Body, "// TODO(jitctx): implement UserServiceImpl.execute")
+	// Fallback methods carry Override: false.
+	require.False(t, m.Override)
+}
+
+// TestScaffoldUseCase_MalformedImplementsMethodSignaturePropagatesScaffoldRenderError
+// verifies that a malformed method string in the implements target causes Execute
+// to return a *domerr.ScaffoldRenderError whose Contract field matches the
+// service that was being rendered when the parse failed.
+func TestScaffoldUseCase_MalformedImplementsMethodSignaturePropagatesScaffoldRenderError(t *testing.T) {
+	t.Parallel()
+
+	// Input-port with a deliberately malformed method signature.
+	spec := model.FeatureSpec{
+		Feature: "create-user",
+		Module:  "user",
+		Package: "com.app.user",
+		Contracts: []model.SpecContract{
+			{
+				Name:    "CreateUserUseCase",
+				Type:    model.ContractInputPort,
+				Methods: []string{"badmethod"}, // no return type — malformed
+			},
+			{
+				Name:       "UserServiceImpl",
+				Type:       model.ContractService,
+				Implements: "CreateUserUseCase",
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+
+	require.Error(t, err)
+	var sre *domerr.ScaffoldRenderError
+	require.ErrorAs(t, err, &sre)
+	require.Equal(t, "UserServiceImpl", sre.Contract)
+
+	// Writer must not have been called since the error occurs before writing.
+	require.Equal(t, 0, writer.callCount)
 }

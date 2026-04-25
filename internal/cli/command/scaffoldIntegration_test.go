@@ -124,6 +124,13 @@ func TestScaffoldCmd_Integration_HappyPath_FourContracts(t *testing.T) {
 	require.Contains(t, serviceContent, "implements CreateUserUseCase")
 	require.Contains(t, serviceContent, "private final UserRepository userRepository")
 	require.Contains(t, serviceContent, `throw new UnsupportedOperationException("Not yet implemented")`)
+
+	// EP03US-001: TODO line is present and precedes the throw.
+	require.Contains(t, serviceContent, "// TODO(jitctx): implement UserServiceImpl.execute")
+	todoIdx := strings.Index(serviceContent, "// TODO(jitctx): implement UserServiceImpl.execute")
+	throwIdx := strings.Index(serviceContent, `throw new UnsupportedOperationException("Not yet implemented")`)
+	require.True(t, todoIdx >= 0 && throwIdx > todoIdx,
+		"TODO must precede the throw in the rendered service file")
 }
 
 func TestScaffoldCmd_Integration_ImportsResolved(t *testing.T) {
@@ -142,6 +149,31 @@ func TestScaffoldCmd_Integration_ImportsResolved(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Contains(t, string(content), "import com.app.user.port.in.CreateUserUseCase;")
+}
+
+// TestScaffoldCmd_Integration_RestAdapterEndpointHasTODO asserts that the
+// scaffold command emits a descriptive TODO comment using the synthesised
+// endpoint method name in UserController.java (EP03US-001, EP03RF-001).
+// The fixture's "POST /users" endpoint is synthesised to "postUsers" by the
+// EndpointSynthesizer, so the TODO must reference that exact name.
+func TestScaffoldCmd_Integration_RestAdapterEndpointHasTODO(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	writeScaffoldFixture(t, workDir)
+
+	cmd, _, _ := newScaffoldCmdFor(t, workDir)
+	cmd.SetArgs([]string{"--feature", "create-user"})
+	require.NoError(t, cmd.ExecuteContext(context.Background()))
+
+	paths := expectedScaffoldPaths(workDir)
+	data, err := os.ReadFile(paths["controller"])
+	require.NoError(t, err)
+	controllerContent := string(data)
+
+	// The synthesised method name for POST /users is "postUsers".
+	require.Contains(t, controllerContent, "// TODO(jitctx): implement UserController.postUsers")
+	require.Contains(t, controllerContent, `throw new UnsupportedOperationException("Not yet implemented")`)
 }
 
 func TestScaffoldCmd_Integration_AtomicConflict(t *testing.T) {
