@@ -19,6 +19,7 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/fsmanifest"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsspec"
+	"github.com/jitctx/jitctx/internal/infrastructure/mdspec"
 	"github.com/jitctx/jitctx/internal/infrastructure/token"
 	"github.com/jitctx/jitctx/internal/infrastructure/treesitter"
 
@@ -68,11 +69,17 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	return Deps{
 		ScanFactory: scanFactory,
 		Query:       appqueryuc.New(manifestStore, ctxDiscoverer, estimator, logger),
-		Plan:        appplanuc.New(manifestStore, logger),
-		PlanNew:     appplannewuc.New(specRenderer, specWriter, pathResolver, logger),
-		Contracts:   appcontractsuc.New(manifestStore, tsParser, logger),
-		WorkDir:     cfg.WorkDir,
-		PlansDir:    cfg.PlansDir,
-		Logger:      logger,
+		Plan: func() planuc.UseCase {
+			specFinder := fsspec.NewFinder()
+			mdParser := mdspec.New()
+			layerer := domspecsvc.NewDependencyLayerer()
+			mapper := domspecsvc.NewContractPathMapper()
+			return appplanuc.New(specFinder, mdParser, layerer, mapper, logger)
+		}(),
+		PlanNew:   appplannewuc.New(specRenderer, specWriter, pathResolver, logger),
+		Contracts: appcontractsuc.New(manifestStore, tsParser, logger),
+		WorkDir:   cfg.WorkDir,
+		PlansDir:  cfg.PlansDir,
+		Logger:    logger,
 	}
 }

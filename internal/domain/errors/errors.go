@@ -23,6 +23,11 @@ var (
 	// EP02US-002 sentinels
 	ErrSpecFileExists  = errors.New("spec file already exists")
 	ErrSpecWriteFailed = errors.New("spec template write failed")
+
+	// EP02US-003 sentinels
+	ErrDependencyCycle         = errors.New("dependency cycle detected")
+	ErrUnsupportedContractType = errors.New("unsupported contract type")
+	ErrSpecFileNotFound        = errors.New("spec file not found")
 )
 
 type ProfileConflictError struct {
@@ -111,4 +116,35 @@ func (e *SpecFileExistsError) Error() string {
 
 func (e *SpecFileExistsError) Is(target error) bool {
 	return target == ErrSpecFileExists
+}
+
+// SpecFileNotFoundError carries the list of paths the resolver searched
+// so the presentation layer can echo them verbatim per the .feature
+// acceptance (stderr lists every path that was searched).
+type SpecFileNotFoundError struct {
+	Feature  string
+	Searched []string
+}
+
+func (e *SpecFileNotFoundError) Error() string {
+	return fmt.Sprintf("spec file not found for feature %q; searched %d location(s)", e.Feature, len(e.Searched))
+}
+
+func (e *SpecFileNotFoundError) Is(target error) bool {
+	return target == ErrSpecFileNotFound
+}
+
+// UnsupportedContractTypeError carries the offending type and the sorted
+// list of supported types for the user-facing message.
+type UnsupportedContractTypeError struct {
+	Type            string
+	SupportedSorted []string
+}
+
+func (e *UnsupportedContractTypeError) Error() string {
+	return fmt.Sprintf("unsupported contract type %q", e.Type)
+}
+
+func (e *UnsupportedContractTypeError) Is(target error) bool {
+	return target == ErrUnsupportedContractType
 }

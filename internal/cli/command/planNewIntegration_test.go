@@ -21,12 +21,12 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/fsspec"
 )
 
-// stubLegacyPlan satisfies planuc.UseCase but always returns an error —
+// stubLayersPlan satisfies planuc.UseCase but always returns an error —
 // it is never called when the --new flag is active.
-type stubLegacyPlan struct{}
+type stubLayersPlan struct{}
 
-func (stubLegacyPlan) Execute(_ context.Context, _ planvo.PlanModuleInput) (planvo.PlanModuleOutput, error) {
-	return planvo.PlanModuleOutput{}, errors.New("not used")
+func (stubLayersPlan) Execute(_ context.Context, _ planvo.LayersInput) (planvo.LayersOutput, error) {
+	return planvo.LayersOutput{}, errors.New("not used")
 }
 
 // newPlanCmdFor builds a NewPlanCmd wired with real adapters pointing at
@@ -42,7 +42,7 @@ func newPlanCmdFor(t *testing.T, workDir, plansDir string) (*cobra.Command, *byt
 	realPlanNew := appplannewuc.New(renderer, writer, resolver, logger)
 
 	var stdout, stderr bytes.Buffer
-	cmd := command.NewPlanCmd(stubLegacyPlan{}, realPlanNew, workDir, plansDir, logger)
+	cmd := command.NewPlanCmd(stubLayersPlan{}, realPlanNew, workDir, plansDir, logger)
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	return cmd, &stdout, &stderr

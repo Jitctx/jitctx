@@ -15,13 +15,15 @@ import (
 )
 
 type planOpts struct {
-	module     string
-	output     string
 	newFeature string
+	module     string
+	feature    string
+	file       string
+	format     string
 }
 
 func NewPlanCmd(
-	legacy planuc.UseCase,
+	layers planuc.UseCase,
 	newTpl plannewuc.UseCase,
 	workDir string,
 	plansDir string,
@@ -30,18 +32,37 @@ func NewPlanCmd(
 	var opts planOpts
 	cmd := &cobra.Command{
 		Use:   "plan",
-		Short: "Show the parallel execution plan for a module",
+		Short: "Show the parallel execution plan for a feature spec",
 		Args:  cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
-			if opts.module == "" {
-				if opts.newFeature != "" {
-					return errors.New("--module is required with --new")
-				}
-				return errors.New("--module is required")
+			modes := 0
+			if opts.newFeature != "" {
+				modes++
+			}
+			if opts.feature != "" {
+				modes++
+			}
+			if opts.file != "" {
+				modes++
+			}
+			if modes == 0 {
+				return errors.New("one of --new, --feature, --file is required")
+			}
+			if modes > 1 {
+				return errors.New("--new, --feature, --file are mutually exclusive")
+			}
+			if opts.newFeature != "" && opts.module == "" {
+				return errors.New("--module is required with --new")
+			}
+			switch opts.format {
+			case "", "text", "json":
+			default:
+				return fmt.Errorf("--format must be text or json, got %q", opts.format)
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// --new mode (UNCHANGED from US-002)
 			if opts.newFeature != "" {
 				base := plansDir
 				if base == "" {
@@ -61,17 +82,27 @@ func NewPlanCmd(
 				return nil
 			}
 
-			// legacy --module path — unchanged
-			out, err := legacy.Execute(cmd.Context(), planvo.PlanModuleInput{Module: opts.module})
+			// --feature / --file mode (NEW for US-003)
+			out, err := layers.Execute(cmd.Context(), planvo.LayersInput{
+				Feature:  opts.feature,
+				FilePath: opts.file,
+				BaseDir:  workDir,
+				PlansDir: plansDir,
+			})
 			if err != nil {
 				return format.TranslateError(err)
 			}
-			return format.WritePlan(cmd.OutOrStdout(), opts.output, out)
+			if opts.format == "json" {
+				return format.WriteLayersJSON(cmd.OutOrStdout(), out)
+			}
+			return format.WriteLayersText(cmd.OutOrStdout(), out)
 		},
 	}
-	cmd.Flags().StringVarP(&opts.module, "module", "m", "", "module id (kebab-case)")
-	cmd.Flags().StringVarP(&opts.output, "output", "o", "markdown", "output format: markdown|json|raw")
-	cmd.Flags().StringVar(&opts.newFeature, "new", "", "feature name (kebab-case); generates a new spec template")
+	cmd.Flags().StringVar(&opts.newFeature, "new", "", "feature name; toggles new-template mode")
+	cmd.Flags().StringVarP(&opts.module, "module", "m", "", "module id (required when --new is set)")
+	cmd.Flags().StringVar(&opts.feature, "feature", "", "feature name for layers mode (mutually exclusive with --new and --file)")
+	cmd.Flags().StringVar(&opts.file, "file", "", "explicit spec path for layers mode (mutually exclusive with --new and --feature)")
+	cmd.Flags().StringVar(&opts.format, "format", "text", "output format for layers mode: text|json")
 	_ = logger
 	return cmd
 }

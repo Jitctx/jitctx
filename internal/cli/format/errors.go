@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
+	"github.com/jitctx/jitctx/internal/domain/service"
 )
 
 // TranslateError maps a domain error to a CLI-friendly error.
@@ -26,6 +27,24 @@ func TranslateError(err error) error {
 	var existsErr *domerr.SpecFileExistsError
 	if errors.As(err, &existsErr) {
 		return fmt.Errorf("spec file already exists: %s", existsErr.Path)
+	}
+	var sfnf *domerr.SpecFileNotFoundError
+	if errors.As(err, &sfnf) {
+		var b strings.Builder
+		fmt.Fprintf(&b, "spec file not found for feature %q; searched:", sfnf.Feature)
+		for _, p := range sfnf.Searched {
+			fmt.Fprintf(&b, "\n  - %s", p)
+		}
+		return errors.New(b.String())
+	}
+	var uct *domerr.UnsupportedContractTypeError
+	if errors.As(err, &uct) {
+		return fmt.Errorf("unsupported contract type %q; supported: %s",
+			uct.Type, strings.Join(uct.SupportedSorted, ", "))
+	}
+	var ce *service.CycleError
+	if errors.As(err, &ce) {
+		return fmt.Errorf("dependency cycle detected: %s", strings.Join(ce.Path, " -> "))
 	}
 	var mnf *domerr.ModuleNotFoundError
 	if errors.As(err, &mnf) {

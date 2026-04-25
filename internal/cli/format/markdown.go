@@ -6,7 +6,6 @@ import (
 	"io"
 
 	contractsvo "github.com/jitctx/jitctx/internal/domain/vo/contracts"
-	planvo "github.com/jitctx/jitctx/internal/domain/vo/plan"
 	queryvo "github.com/jitctx/jitctx/internal/domain/vo/query"
 	scanvo "github.com/jitctx/jitctx/internal/domain/vo/scan"
 )
@@ -93,30 +92,6 @@ func writeQueryMarkdown(w io.Writer, out queryvo.QueryContextOutput) error {
 	for _, c := range out.Loaded {
 		if _, err := fmt.Fprintf(w, "---\n<!-- source: %s | tags: %v -->\n\n%s\n\n", c.Path, c.Tags, c.Body); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func WritePlan(w io.Writer, format string, out planvo.PlanModuleOutput) error {
-	if format == "json" {
-		return writeJSON(w, out)
-	}
-	if _, err := fmt.Fprintf(w, "plan for %s:\n", out.Module); err != nil {
-		return err
-	}
-	for _, layer := range out.Layers {
-		kind := "sequential"
-		if layer.Parallel {
-			kind = "parallel"
-		}
-		if _, err := fmt.Fprintf(w, "  layer %d [%s]:\n", layer.Index, kind); err != nil {
-			return err
-		}
-		for _, t := range layer.Targets {
-			if _, err := fmt.Fprintf(w, "    - %s (%s)\n", t.Path, t.Kind); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
