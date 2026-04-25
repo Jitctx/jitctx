@@ -148,3 +148,25 @@ func (e *UnsupportedContractTypeError) Error() string {
 func (e *UnsupportedContractTypeError) Is(target error) bool {
 	return target == ErrUnsupportedContractType
 }
+
+// EP02US-004 sentinels
+var ErrContractTargetNotFound = errors.New("contract target not found in spec or manifest")
+
+// ContractTargetNotFoundError carries the resolution context so the
+// presentation layer can produce the user-friendly stderr required by the
+// .feature scenario "Contracts slice fails for unknown file".
+type ContractTargetNotFoundError struct {
+	TargetFile       string // verbatim --for value
+	ContractName     string // basename-derived name from ContractTargetResolver
+	SearchedSpec     bool   // true when a spec lookup was attempted
+	SearchedManifest bool   // true when a manifest fallback was attempted
+}
+
+func (e *ContractTargetNotFoundError) Error() string {
+	return fmt.Sprintf("contract %q (from %s) not found in spec or manifest",
+		e.ContractName, e.TargetFile)
+}
+
+func (e *ContractTargetNotFoundError) Is(target error) bool {
+	return target == ErrContractTargetNotFound
+}

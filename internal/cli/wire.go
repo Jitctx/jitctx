@@ -66,20 +66,29 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	specWriter := fsspec.NewWriter()
 	pathResolver := domspecsvc.NewSpecPathResolver()
 
+	specFinder := fsspec.NewFinder()
+	mdParser := mdspec.New()
+
 	return Deps{
 		ScanFactory: scanFactory,
 		Query:       appqueryuc.New(manifestStore, ctxDiscoverer, estimator, logger),
 		Plan: func() planuc.UseCase {
-			specFinder := fsspec.NewFinder()
-			mdParser := mdspec.New()
 			layerer := domspecsvc.NewDependencyLayerer()
 			mapper := domspecsvc.NewContractPathMapper()
 			return appplanuc.New(specFinder, mdParser, layerer, mapper, logger)
 		}(),
-		PlanNew:   appplannewuc.New(specRenderer, specWriter, pathResolver, logger),
-		Contracts: appcontractsuc.New(manifestStore, tsParser, logger),
-		WorkDir:   cfg.WorkDir,
-		PlansDir:  cfg.PlansDir,
-		Logger:    logger,
+		PlanNew: appplannewuc.New(specRenderer, specWriter, pathResolver, logger),
+		Contracts: appcontractsuc.New(
+			specFinder,
+			mdParser,
+			domspecsvc.NewContractPathMapper(),
+			domspecsvc.NewContractRoleDescriber(),
+			domspecsvc.NewContractTargetResolver(),
+			manifestStore,
+			logger,
+		),
+		WorkDir:  cfg.WorkDir,
+		PlansDir: cfg.PlansDir,
+		Logger:   logger,
 	}
 }

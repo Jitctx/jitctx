@@ -46,6 +46,24 @@ func TranslateError(err error) error {
 	if errors.As(err, &ce) {
 		return fmt.Errorf("dependency cycle detected: %s", strings.Join(ce.Path, " -> "))
 	}
+	var ctnf *domerr.ContractTargetNotFoundError
+	if errors.As(err, &ctnf) {
+		var hint string
+		switch {
+		case ctnf.SearchedSpec && ctnf.SearchedManifest:
+			hint = "run `jitctx scan` or `jitctx plan` first"
+		case ctnf.SearchedManifest:
+			hint = "run `jitctx scan` first to populate project-state.yaml, " +
+				"or pass --feature/--file to consult a spec"
+		case ctnf.SearchedSpec:
+			hint = "run `jitctx plan --new` to create a spec, " +
+				"or `jitctx scan` to populate project-state.yaml"
+		default:
+			hint = "run `jitctx scan` or `jitctx plan` first"
+		}
+		return fmt.Errorf("could not find contract %q (from %s) in spec or project-state.yaml; %s",
+			ctnf.ContractName, ctnf.TargetFile, hint)
+	}
 	var mnf *domerr.ModuleNotFoundError
 	if errors.As(err, &mnf) {
 		return fmt.Errorf("module %q not found; available modules: %s",

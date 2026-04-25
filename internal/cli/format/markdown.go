@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	contractsvo "github.com/jitctx/jitctx/internal/domain/vo/contracts"
 	queryvo "github.com/jitctx/jitctx/internal/domain/vo/query"
 	scanvo "github.com/jitctx/jitctx/internal/domain/vo/scan"
 )
@@ -91,18 +90,6 @@ func writeQueryMarkdown(w io.Writer, out queryvo.QueryContextOutput) error {
 	}
 	for _, c := range out.Loaded {
 		if _, err := fmt.Fprintf(w, "---\n<!-- source: %s | tags: %v -->\n\n%s\n\n", c.Path, c.Tags, c.Body); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func WriteContracts(w io.Writer, format string, out contractsvo.ExtractContractsOutput) error {
-	if format == "json" {
-		return writeJSON(w, out)
-	}
-	for _, c := range out.Contracts {
-		if _, err := fmt.Fprintf(w, "## %s (%s)\nPath: %s\n\n%s\n\n", c.Name, c.Type, c.Path, c.Body); err != nil {
 			return err
 		}
 	}

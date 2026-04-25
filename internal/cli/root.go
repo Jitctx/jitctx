@@ -17,7 +17,7 @@ func NewRootCmd(d Deps) *cobra.Command {
 		command.NewScanCmd(d.ScanFactory, d.Logger),
 		command.NewQueryCmd(d.Query, d.Logger),
 		command.NewPlanCmd(d.Plan, d.PlanNew, d.WorkDir, d.PlansDir, d.Logger),
-		command.NewContractsCmd(d.Contracts, d.Logger),
+		command.NewContractsCmd(d.Contracts, d.WorkDir, d.PlansDir, d.Logger),
 		command.NewListCmd(d.Query, d.Logger),
 	)
 	return root

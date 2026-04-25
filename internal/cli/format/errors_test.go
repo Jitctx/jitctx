@@ -68,3 +68,56 @@ func TestTranslateError(t *testing.T) {
 		})
 	}
 }
+
+func TestTranslateError_ContractTargetNotFound_BothSearched(t *testing.T) {
+	t.Parallel()
+
+	err := &domerr.ContractTargetNotFoundError{
+		TargetFile:       "x.java",
+		ContractName:     "X",
+		SearchedSpec:     true,
+		SearchedManifest: true,
+	}
+
+	got := format.TranslateError(err)
+	require.NotNil(t, got)
+	require.Contains(t, got.Error(), `could not find contract "X"`)
+	require.Contains(t, got.Error(), "x.java")
+	require.Contains(t, got.Error(), "jitctx scan")
+	require.Contains(t, got.Error(), "jitctx plan")
+}
+
+func TestTranslateError_ContractTargetNotFound_SpecOnly(t *testing.T) {
+	t.Parallel()
+
+	err := &domerr.ContractTargetNotFoundError{
+		TargetFile:       "x.java",
+		ContractName:     "X",
+		SearchedSpec:     true,
+		SearchedManifest: false,
+	}
+
+	got := format.TranslateError(err)
+	require.NotNil(t, got)
+	require.Contains(t, got.Error(), `could not find contract "X"`)
+	require.Contains(t, got.Error(), "x.java")
+	require.Contains(t, got.Error(), "jitctx plan --new")
+}
+
+func TestTranslateError_ContractTargetNotFound_ManifestOnly(t *testing.T) {
+	t.Parallel()
+
+	err := &domerr.ContractTargetNotFoundError{
+		TargetFile:       "x.java",
+		ContractName:     "X",
+		SearchedSpec:     false,
+		SearchedManifest: true,
+	}
+
+	got := format.TranslateError(err)
+	require.NotNil(t, got)
+	require.Contains(t, got.Error(), `could not find contract "X"`)
+	require.Contains(t, got.Error(), "x.java")
+	require.Contains(t, got.Error(), "first to populate project-state.yaml")
+	require.Contains(t, got.Error(), "--feature/--file")
+}
