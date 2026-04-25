@@ -2,6 +2,8 @@ package service_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,11 +13,18 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
 )
 
-// loadBundledForTest loads the real bundled spring-boot-hexagonal profile so
-// tests that verify rule ordering run against the actual YAML, not a synthetic copy.
-func loadBundledForTest(t *testing.T) *model.FrameworkProfile {
+// loadSampleForTest loads the sample spring-boot-hexagonal profile from the
+// testdata/fsprofile fixture so tests that verify rule ordering run against the
+// actual YAML, not a synthetic copy.
+func loadSampleForTest(t *testing.T) *model.FrameworkProfile {
 	t.Helper()
-	loader := fsprofile.New(t.TempDir())
+	// Resolve testdata path relative to repo root.
+	yamlPath := filepath.Join("..", "..", "..", "testdata", "fsprofile", "spring-boot-hexagonal.yaml")
+	dir := t.TempDir()
+	data, err := os.ReadFile(yamlPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spring-boot-hexagonal.yaml"), data, 0o644))
+	loader := fsprofile.New(dir)
 	prof, err := loader.Load(context.Background(), "spring-boot-hexagonal")
 	require.NoError(t, err)
 	return prof
@@ -99,10 +108,10 @@ func TestClassifyDeclaration(t *testing.T) {
 	}
 }
 
-// TestClassifyDeclaration_BundledProfile runs two sub-cases against the real
-// bundled spring-boot-hexagonal YAML to lock rule ordering and coverage of
+// TestClassifyDeclaration_SampleProfile runs two sub-cases against the real
+// sample spring-boot-hexagonal YAML to lock rule ordering and coverage of
 // EP01RF-012 §Business Rule (explicit @Repository mention).
-func TestClassifyDeclaration_BundledProfile(t *testing.T) {
+func TestClassifyDeclaration_SampleProfile(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -145,7 +154,7 @@ func TestClassifyDeclaration_BundledProfile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			bundled := loadBundledForTest(t)
+			bundled := loadSampleForTest(t)
 			gotType, gotMatched := service.ClassifyDeclaration(tc.decl, tc.path, bundled)
 			require.Equal(t, tc.wantMatched, gotMatched)
 			require.Equal(t, tc.wantType, gotType)

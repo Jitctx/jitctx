@@ -15,6 +15,16 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
 )
 
+// writeSampleProfile reads the shared spring-boot-hexagonal sample YAML from
+// testdata/fsprofile/ and writes it into dir so the detector can find it.
+func writeSampleProfile(t *testing.T, dir string) {
+	t.Helper()
+	yamlPath := filepath.Join("..", "..", "..", "testdata", "fsprofile", "spring-boot-hexagonal.yaml")
+	data, err := os.ReadFile(yamlPath)
+	require.NoError(t, err, "read sample profile fixture")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spring-boot-hexagonal.yaml"), data, 0o644))
+}
+
 func TestDetector_PomXML(t *testing.T) {
 	t.Parallel()
 
@@ -26,11 +36,14 @@ func TestDetector_PomXML(t *testing.T) {
 		</project>`)},
 	}
 
-	d := fsprofile.NewDetector(t.TempDir())
+	dir := t.TempDir()
+	writeSampleProfile(t, dir)
+
+	d := fsprofile.NewDetector(dir)
 	prof, err := d.Detect(context.Background(), fsys)
 	require.NoError(t, err)
 	require.Equal(t, "spring-boot-hexagonal", prof.Name)
-	require.Equal(t, model.ProfileSourceBundled, prof.Source)
+	require.Equal(t, model.ProfileSourceCustom, prof.Source)
 }
 
 func TestDetector_BuildGradle(t *testing.T) {
@@ -42,11 +55,14 @@ func TestDetector_BuildGradle(t *testing.T) {
 		}`)},
 	}
 
-	d := fsprofile.NewDetector(t.TempDir())
+	dir := t.TempDir()
+	writeSampleProfile(t, dir)
+
+	d := fsprofile.NewDetector(dir)
 	prof, err := d.Detect(context.Background(), fsys)
 	require.NoError(t, err)
 	require.Equal(t, "spring-boot-hexagonal", prof.Name)
-	require.Equal(t, model.ProfileSourceBundled, prof.Source)
+	require.Equal(t, model.ProfileSourceCustom, prof.Source)
 }
 
 func TestDetector_NoMatch(t *testing.T) {
@@ -70,19 +86,25 @@ func TestDetector_BuildGradleKts(t *testing.T) {
 		}`)},
 	}
 
-	d := fsprofile.NewDetector(t.TempDir())
+	dir := t.TempDir()
+	writeSampleProfile(t, dir)
+
+	d := fsprofile.NewDetector(dir)
 	prof, err := d.Detect(context.Background(), fsys)
 	require.NoError(t, err)
 	require.Equal(t, "spring-boot-hexagonal", prof.Name)
-	require.Equal(t, model.ProfileSourceBundled, prof.Source)
+	require.Equal(t, model.ProfileSourceCustom, prof.Source)
 }
 
-func TestDetector_CustomOverridesBundled(t *testing.T) {
+// TestDetector_MultipleCustomProfiles_FirstAlphabeticalWins verifies that when
+// multiple custom profiles both match a project, the alphabetically-first one
+// is selected (EP01RNF-002 deterministic precedence).
+func TestDetector_MultipleCustomProfiles_FirstAlphabeticalWins(t *testing.T) {
 	t.Parallel()
 
-	// Write a custom profile named "my-spring" that also detects pom.xml.
-	customDir := t.TempDir()
-	customYAML := []byte(`name: my-spring
+	// Both profiles match pom.xml containing "org.springframework.boot".
+	sharedYAML := func(name string) []byte {
+		return []byte(`name: ` + name + `
 languages: [java]
 query_lang: java
 detect:
@@ -98,8 +120,11 @@ module_detection:
       value: /port/in/
 rules: []
 `)
-	err := os.WriteFile(filepath.Join(customDir, "my-spring.yaml"), customYAML, 0o644)
-	require.NoError(t, err)
+	}
+
+	customDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(customDir, "aaa-spring.yaml"), sharedYAML("aaa-spring"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(customDir, "my-spring.yaml"), sharedYAML("my-spring"), 0o644))
 
 	fsys := fstest.MapFS{
 		"pom.xml": &fstest.MapFile{Data: []byte(`<project>
@@ -112,7 +137,7 @@ rules: []
 	d := fsprofile.NewDetector(customDir)
 	prof, err := d.Detect(context.Background(), fsys)
 	require.NoError(t, err)
-	require.Equal(t, "my-spring", prof.Name)
+	require.Equal(t, "aaa-spring", prof.Name)
 	require.Equal(t, model.ProfileSourceCustom, prof.Source)
 }
 
@@ -148,22 +173,4 @@ rules: []
 	prof, err := d.Detect(context.Background(), fsys)
 	require.NoError(t, err)
 	require.Equal(t, model.ProfileSourceCustom, prof.Source)
-}
-
-func TestDetector_BundledSourceStamp(t *testing.T) {
-	t.Parallel()
-
-	fsys := fstest.MapFS{
-		"pom.xml": &fstest.MapFile{Data: []byte(`<project>
-			<parent>
-				<groupId>org.springframework.boot</groupId>
-			</parent>
-		</project>`)},
-	}
-
-	// Empty custom dir — only bundled profiles apply.
-	d := fsprofile.NewDetector(t.TempDir())
-	prof, err := d.Detect(context.Background(), fsys)
-	require.NoError(t, err)
-	require.Equal(t, model.ProfileSourceBundled, prof.Source)
 }

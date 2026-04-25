@@ -3,11 +3,17 @@ package model
 // ProfileSource identifies where a profile was loaded from. Populated
 // by the infrastructure adapter at load/detect time; the domain never
 // constructs ProfileSource values itself.
+//
+// After the externalize-profiles chore there is exactly one valid source:
+// "custom" — a YAML file on the filesystem under the user's profiles
+// directory (default ".jitctx/profiles/"). The zero value is only valid
+// in tests that construct FrameworkProfile literals directly.
 type ProfileSource string
 
 const (
-	ProfileSourceBundled ProfileSource = "bundled"
-	ProfileSourceCustom  ProfileSource = "custom"
+	// ProfileSourceCustom marks a profile loaded from the user's profiles
+	// directory on disk. This is the only production-valid source.
+	ProfileSourceCustom ProfileSource = "custom"
 )
 
 type FrameworkProfile struct {

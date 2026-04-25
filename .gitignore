@@ -12,5 +12,5 @@ CLAUDE.md
 scripts
 /jitctx
 /project-state.yaml
-/demo/
+/demo*
 docs

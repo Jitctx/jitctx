@@ -29,23 +29,14 @@ func NewDetectorWithLogger(userDir string, logger *slog.Logger) *Detector {
 	return &Detector{userDir: userDir, logger: logger}
 }
 
-// Detect picks the first matching profile (custom profiles first, then bundled).
+// Detect picks the first matching profile from the user profiles directory.
+// Returns ErrNoProfileMatch when no profile matches.
 func (d *Detector) Detect(ctx context.Context, fsys fs.FS) (*model.FrameworkProfile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	// Load and evaluate custom profiles first.
-	customProfiles := d.loadCustomProfiles()
-	for _, prof := range customProfiles {
-		if profileMatches(prof, fsys) {
-			return prof, nil
-		}
-	}
-
-	// Evaluate bundled profiles.
-	bundledProfiles := d.loadBundledProfiles()
-	for _, prof := range bundledProfiles {
+	for _, prof := range d.loadCustomProfiles() {
 		if profileMatches(prof, fsys) {
 			return prof, nil
 		}
@@ -83,32 +74,6 @@ func (d *Detector) loadCustomProfiles() []*model.FrameworkProfile {
 			continue
 		}
 		prof.Source = model.ProfileSourceCustom
-		profiles = append(profiles, prof)
-	}
-	return profiles
-}
-
-func (d *Detector) loadBundledProfiles() []*model.FrameworkProfile {
-	var profiles []*model.FrameworkProfile
-	entries, err := fs.ReadDir(embeddedProfiles, "bundled")
-	if err != nil {
-		return nil
-	}
-	// Explicit sort guarantees deterministic precedence (EP01RNF-002).
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
-			continue
-		}
-		data, err := embeddedProfiles.ReadFile("bundled/" + e.Name())
-		if err != nil {
-			continue
-		}
-		prof, err := decodeProfile(data, true)
-		if err != nil {
-			continue
-		}
-		prof.Source = model.ProfileSourceBundled
 		profiles = append(profiles, prof)
 	}
 	return profiles

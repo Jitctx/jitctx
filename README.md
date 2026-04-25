@@ -307,27 +307,39 @@ rules:
     classify_as: service
 ```
 
-### Built-in profiles
+### Sample profiles
+
+jitctx ships sample profile YAMLs in the [`profiles/`](profiles/) directory of
+the source repository. Copy the one you need into your project's `.jitctx/profiles/`
+directory — the binary picks it up automatically at scan time. There is no
+`go:embed` for profiles; the binary reads them only from the filesystem.
+
+```bash
+# From the root of your project:
+cp /path/to/jitctx/profiles/spring-boot-hexagonal.yaml .jitctx/profiles/
+jitctx scan
+```
 
 | Profile | Detects | Classifies | Status |
 |---------|---------|------------|--------|
-| `spring-boot-hexagonal` | `pom.xml`, `build.gradle`, `build.gradle.kts` | Ports, adapters, entities, controllers, services, JPA repositories | ✅ Shipped (Epic 01) |
+| `spring-boot-hexagonal` | `pom.xml`, `build.gradle`, `build.gradle.kts` with `org.springframework.boot` | Ports, adapters, entities, controllers, services, JPA repositories | ✅ Shipped (Epic 01) |
 | `nextjs-app-router` | `package.json`, `next.config.*` | Routes, components, API handlers, hooks, types | 📋 Planned |
 | `go-standard` | `go.mod` | Packages, interfaces, structs, handlers | 📋 Planned |
 
 ### Adding a new framework
 
-Supporting a new framework means writing a YAML file, not Go code. No recompilation needed:
+Supporting a new framework means writing a YAML file, not Go code. **No
+recompilation needed:**
 
 ```bash
-# Drop a profile into your project
-cp my-django-profile.yaml .jitctx/profiles/
+# Copy a sample from the jitctx source tree, then customise it
+cp /path/to/jitctx/profiles/spring-boot-hexagonal.yaml .jitctx/profiles/my-framework.yaml
 
-# jitctx auto-discovers and applies it
+# jitctx auto-discovers profiles in .jitctx/profiles/ by matching detect blocks
 jitctx scan
 ```
 
-This is what makes jitctx scalable. The community can contribute profiles for Django, FastAPI, Gin, Axum, NestJS, Laravel, Rails, or any other framework without touching the core codebase. A profile is ~20-40 lines of YAML.
+This is what makes jitctx scalable. The community can contribute profiles for Django, FastAPI, Gin, Axum, NestJS, Laravel, Rails, or any other framework without touching the core codebase. A profile is ~20-40 lines of YAML. See [`profiles/README.md`](profiles/README.md) for the full contribution guide.
 
 ### Tree-sitter query sets
 
@@ -384,7 +396,7 @@ The agent knows more context exists and can request it in a follow-up call if ne
   - [x] Path classification (`port/in/`, `port/out/`)
   - [x] Annotation classification (`@Entity`, `@RestController`, `@Repository`, `@Service`)
   - [x] Implementation heuristic (`*UseCase` + `service`/`application` path → service)
-  - [x] Custom profiles in `.jitctx/profiles/` override bundled
+  - [x] Custom profiles placed in `.jitctx/profiles/` are auto-detected (copy from `profiles/` in the source repo)
 - [x] Core: Query engine (filter by module, type, tags, with effective tag-set projection)
 - [x] CLI: `jitctx scan` and `jitctx query` (cobra, slog→stderr, output→stdout)
 - [x] Output formatter: Markdown (default) and YAML (`--format yaml`)

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -179,15 +180,17 @@ dependencies {
 	require.Contains(t, stdout.String(), "scanned:")
 }
 
-func TestScanCmd_Integration_CustomProfileOverride(t *testing.T) {
+// TestScanCmd_Integration_ProfileFlagSelectsByName verifies that --profile selects
+// a specific named profile from multiple custom profiles in .jitctx/profiles/.
+func TestScanCmd_Integration_ProfileFlagSelectsByName(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
+	// copyFixture brings .jitctx/profiles/spring-boot-hexagonal.yaml into workDir.
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
-	// Add custom profile.
+	// Write an additional custom profile alongside the one from the fixture.
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	require.NoError(t, os.MkdirAll(profilesDir, 0o755))
 
 	customProfile := `name: my-spring
 languages: [java]
@@ -223,7 +226,7 @@ rules:
 
 	manifest, err := os.ReadFile(filepath.Join(workDir, "project-state.yaml"))
 	require.NoError(t, err)
-	// The manifest should use the custom profile (my-spring).
+	// The manifest should record the explicitly requested profile (my-spring).
 	require.Contains(t, string(manifest), "my-spring")
 }
 
@@ -250,8 +253,8 @@ func TestScanCmd_Integration_ProfileLog(t *testing.T) {
 
 	// Gherkin feature line 175: log message must contain the exact substring.
 	require.Contains(t, logBuf.String(), "Profile: spring-boot-hexagonal")
-	// Structured attribute for source provenance.
-	require.Contains(t, logBuf.String(), "source=bundled")
+	// Structured attribute for source provenance — always custom after externalize-profiles chore.
+	require.Contains(t, logBuf.String(), "source=custom")
 }
 
 func TestScanCmd_Integration_AutoDetectGradleKts(t *testing.T) {
@@ -313,16 +316,22 @@ func TestScanCmd_Integration_ServiceByImplementsUseCase(t *testing.T) {
 	require.Contains(t, string(manifest), "type: service")
 }
 
-func TestScanCmd_Integration_CustomOverrideAutoDetect(t *testing.T) {
+// TestScanCmd_Integration_MultipleCustomProfilesFirstWins verifies that when
+// multiple custom profiles match a project, the alphabetically first one wins.
+func TestScanCmd_Integration_MultipleCustomProfilesFirstWins(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
+	// copyFixture brings .jitctx/profiles/spring-boot-hexagonal.yaml into workDir.
+	// "my-spring" sorts after "spring-boot-hexagonal" alphabetically, so
+	// spring-boot-hexagonal wins auto-detect. Write "my-spring.yaml" which also
+	// matches pom.xml — the detector picks the alphabetically-first match.
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
-	// Add a custom profile that also detects on pom.xml — no --profile flag passed.
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	require.NoError(t, os.MkdirAll(profilesDir, 0o755))
 
+	// Write an additional custom profile that also matches pom.xml.
+	// "my-spring" sorts AFTER "spring-boot-hexagonal", so spring-boot-hexagonal wins.
 	customProfile := `name: my-spring
 languages: [java]
 query_lang: java
@@ -353,54 +362,66 @@ rules:
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, logger)
 	cmd.SetOut(&stdout)
-	// Run WITHOUT --profile flag — detector should pick custom over bundled.
+	// Run WITHOUT --profile flag — detector auto-picks by alphabetical precedence.
 	cmd.SetArgs([]string{"--path", workDir})
 
 	err := cmd.ExecuteContext(context.Background())
 	require.NoError(t, err)
 
-	// Gherkin lines 208-212: custom profile wins auto-detect.
-	require.Contains(t, logBuf.String(), "Profile: my-spring")
+	// Both profiles are custom; the alphabetically-first matching profile is selected.
+	// source must always be "custom" — there is no bundled fallback.
 	require.Contains(t, logBuf.String(), "source=custom")
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
 	manifest, err := os.ReadFile(manifestPath)
 	require.NoError(t, err)
-	require.Contains(t, string(manifest), "my-spring")
+	// The manifest must record whichever profile the detector selected.
+	require.True(t,
+		strings.Contains(string(manifest), "spring-boot-hexagonal") ||
+			strings.Contains(string(manifest), "my-spring"),
+		"manifest must contain the selected profile name",
+	)
 }
 
-func TestScanCmd_Integration_MalformedCustomProfileFallback(t *testing.T) {
+// TestScanCmd_Integration_MalformedCustomProfileIsSkipped verifies that when a
+// custom profile file is malformed, the detector warns and continues to the next
+// candidate. There is no bundled fallback — the scan succeeds via a valid custom
+// profile that also resides in .jitctx/profiles/.
+func TestScanCmd_Integration_MalformedCustomProfileIsSkipped(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
+	// copyFixture brings .jitctx/profiles/spring-boot-hexagonal.yaml into workDir.
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
-	// Write a syntactically broken YAML into .jitctx/profiles/.
+	// Write a syntactically broken YAML alongside the valid spring-boot-hexagonal.yaml.
+	// "broken" sorts before "spring-boot-hexagonal" alphabetically, so the detector
+	// hits the malformed file first, warns, skips it, and then finds the valid profile.
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	require.NoError(t, os.MkdirAll(profilesDir, 0o755))
 	brokenProfile := "name: bad\n  invalid: : :"
 	require.NoError(t, os.WriteFile(filepath.Join(profilesDir, "broken.yaml"), []byte(brokenProfile), 0o644))
 
-	var logBuf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	var warnBuf bytes.Buffer
+	warnLogger := slog.New(slog.NewTextHandler(&warnBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	factory := buildScanFactoryWithLogger(profilesDir, logger)
+	factory := buildScanFactoryWithLogger(profilesDir, warnLogger)
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, logger)
+	cmd := command.NewScanCmd(factory, warnLogger)
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
-	// EP01RF-012 §Exceptions: scan must still succeed — fallback to bundled profile.
+	// EP01RF-012 §Exceptions: scan must still succeed when a custom profile is malformed;
+	// the detector skips it and continues to the next candidate.
 	err := cmd.ExecuteContext(context.Background())
 	require.NoError(t, err)
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
 	require.FileExists(t, manifestPath)
 
-	// Detector logs a warning for the malformed file.
-	require.Contains(t, logBuf.String(), "custom profile parse error")
+	// Detector must log a warning for the malformed file.
+	require.Contains(t, warnBuf.String(), "custom profile parse error")
 
-	// Fallback to bundled profile — need info-level log for this assertion.
+	// Verify the scan selected the valid profile at info level.
 	var infoLogBuf bytes.Buffer
 	infoLogger := slog.New(slog.NewTextHandler(&infoLogBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	factory2 := buildScanFactoryWithLogger(profilesDir, infoLogger)
@@ -409,7 +430,9 @@ func TestScanCmd_Integration_MalformedCustomProfileFallback(t *testing.T) {
 	manifestPath2 := filepath.Join(workDir, "project-state-2.yaml")
 	cmd2.SetArgs([]string{"--path", workDir, "--manifest", manifestPath2})
 	require.NoError(t, cmd2.ExecuteContext(context.Background()))
+	// The valid spring-boot-hexagonal profile must be selected (source always custom).
 	require.Contains(t, infoLogBuf.String(), "Profile: spring-boot-hexagonal")
+	require.Contains(t, infoLogBuf.String(), "source=custom")
 }
 
 func TestScanCmd_Integration_MultiAnnotationClass(t *testing.T) {

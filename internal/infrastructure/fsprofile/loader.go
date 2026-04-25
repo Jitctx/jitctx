@@ -3,7 +3,7 @@ package fsprofile
 import (
 	"bytes"
 	"context"
-	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -17,9 +17,6 @@ import (
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
 	"github.com/jitctx/jitctx/internal/domain/model"
 )
-
-//go:embed bundled/*.yaml
-var embeddedProfiles embed.FS
 
 // Loader implements LoadProfilePort and ListProfilesPort.
 type Loader struct {
@@ -37,7 +34,8 @@ func NewWithLogger(userDir string, logger *slog.Logger) *Loader {
 	return &Loader{userDir: userDir, logger: logger}
 }
 
-// Load loads a profile by name. Looks in userDir first, then bundled profiles.
+// Load loads a profile by name from the user profiles directory.
+// Returns ErrProfileInvalid if the profile is not found or fails to parse.
 func (l *Loader) Load(ctx context.Context, name string) (*model.FrameworkProfile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -60,57 +58,47 @@ func (l *Loader) Load(ctx context.Context, name string) (*model.FrameworkProfile
 	for _, ext := range []string{".yaml", ".yml"} {
 		path := filepath.Join(l.userDir, name+ext)
 		data, err := os.ReadFile(path)
-		if err == nil {
-			prof, parseErr := decodeProfile(data, true)
-			if parseErr != nil {
-				l.logger.Warn("custom profile parse error", "file", path, "reason", parseErr)
-				// Fall through to bundled.
-				break
-			}
-			prof.Source = model.ProfileSourceCustom
-			return prof, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
 		}
+		if err != nil {
+			return nil, fmt.Errorf("read profile %q: %w", path, err)
+		}
+		prof, parseErr := decodeProfile(data, true)
+		if parseErr != nil {
+			return nil, fmt.Errorf("profile %q: %w: %w", path, parseErr, domerr.ErrProfileInvalid)
+		}
+		prof.Source = model.ProfileSourceCustom
+		return prof, nil
 	}
-	// Try bundled.
-	data, err := embeddedProfiles.ReadFile("bundled/" + name + ".yaml")
-	if err != nil {
-		return nil, fmt.Errorf("profile %q not found: %w", name, domerr.ErrProfileInvalid)
-	}
-	prof, err := decodeProfile(data, true)
-	if err != nil {
-		return nil, err
-	}
-	prof.Source = model.ProfileSourceBundled
-	return prof, nil
+	return nil, fmt.Errorf("profile %q not found: %w", name, domerr.ErrProfileInvalid)
 }
 
-// List returns the names of all available profiles (custom + bundled, deduplicated).
+// List returns the names of all available profiles from the user directory.
+// Returns an empty slice (not an error) when the directory is absent.
 func (l *Loader) List(ctx context.Context) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	names := make(map[string]bool)
-
-	// Custom profiles.
-	if entries, err := os.ReadDir(l.userDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && (strings.HasSuffix(e.Name(), ".yaml") || strings.HasSuffix(e.Name(), ".yml")) {
-				name := strings.TrimSuffix(strings.TrimSuffix(e.Name(), ".yml"), ".yaml")
-				names[name] = true
-			}
-		}
+	entries, err := os.ReadDir(l.userDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return []string{}, nil
 	}
-
-	// Bundled profiles.
-	entries, err := fs.ReadDir(embeddedProfiles, "bundled")
 	if err != nil {
-		return nil, fmt.Errorf("list bundled profiles: %w", err)
+		return nil, fmt.Errorf("read profiles dir %q: %w", l.userDir, err)
 	}
+
+	names := make(map[string]bool)
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
-			name := strings.TrimSuffix(e.Name(), ".yaml")
-			names[name] = true
+		if e.IsDir() {
+			continue
 		}
+		n := e.Name()
+		if !strings.HasSuffix(n, ".yaml") && !strings.HasSuffix(n, ".yml") {
+			continue
+		}
+		base := strings.TrimSuffix(strings.TrimSuffix(n, ".yml"), ".yaml")
+		names[base] = true
 	}
 
 	result := make([]string, 0, len(names))
