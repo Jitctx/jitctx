@@ -23,3 +23,6 @@ Type: rest-adapter
 Uses: CreateUserUseCase
 Endpoints:
 - POST /users
+
+## Contract: User
+Type: aggregate-root

@@ -1,0 +1,14 @@
+package {{.Package}};
+{{range .Imports}}
+import {{.}};
+{{- end}}
+
+public class {{.ClassName}}Test {
+{{range .TestMethods}}
+
+    @Test
+    void {{.Name}}() {
+        {{.Body}}
+    }
+{{- end}}
+}

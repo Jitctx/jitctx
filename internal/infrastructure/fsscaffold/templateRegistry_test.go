@@ -3,6 +3,7 @@ package fsscaffold_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -302,5 +303,262 @@ func TestTemplateRegistry_Render(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, errors.Is(err, context.Canceled),
 			"expected context.Canceled, got: %v", err)
+	})
+}
+
+func TestTestTemplateRegistry_Render(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Service", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewTestRegistry()
+		in := scaffoldvo.TestRenderInput{
+			ContractType: "service",
+			Package:      "com.app.user.application",
+			ClassName:    "UserServiceImpl",
+			Imports: []string{
+				"org.junit.jupiter.api.Test",
+				"org.junit.jupiter.api.extension.ExtendWith",
+				"org.mockito.InjectMocks",
+				"org.mockito.Mock",
+				"org.mockito.junit.jupiter.MockitoExtension",
+			},
+			Mocks: []scaffoldvo.TestMockField{
+				{Type: "UserRepository", FieldName: "userRepository"},
+			},
+			TestMethods: []scaffoldvo.TestMethod{
+				{Name: "execute_shouldDoSomething", Body: "// TODO: implement test"},
+			},
+		}
+
+		out, err := reg.Render(context.Background(), in)
+		require.NoError(t, err)
+
+		got := string(out)
+		require.Contains(t, got, "package com.app.user.application;")
+		require.Contains(t, got, "@ExtendWith(MockitoExtension.class)")
+		require.Contains(t, got, "public class UserServiceImplTest {")
+		require.Contains(t, got, "@Mock")
+		require.Contains(t, got, "private UserRepository userRepository;")
+		require.Contains(t, got, "@InjectMocks")
+		require.Contains(t, got, "private UserServiceImpl userServiceImpl;")
+		require.Contains(t, got, "@Test")
+		require.Contains(t, got, "void execute_shouldDoSomething()")
+		require.Contains(t, got, "// TODO: implement test")
+
+		// Verify deterministic ordering: @ExtendWith before class, @Mock before @InjectMocks, @Test inside body.
+		extendIdx := strings.Index(got, "@ExtendWith")
+		classIdx := strings.Index(got, "public class UserServiceImplTest")
+		mockIdx := strings.Index(got, "@Mock")
+		injectIdx := strings.Index(got, "@InjectMocks")
+		testIdx := strings.Index(got, "@Test")
+		require.Less(t, extendIdx, classIdx, "@ExtendWith must appear before class declaration")
+		require.Less(t, mockIdx, injectIdx, "@Mock must appear before @InjectMocks")
+		require.Less(t, injectIdx, testIdx, "@InjectMocks must appear before @Test")
+	})
+
+	t.Run("RestAdapter", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewTestRegistry()
+		in := scaffoldvo.TestRenderInput{
+			ContractType: "rest-adapter",
+			Package:      "com.app.user.adapter.in.web",
+			ClassName:    "UserController",
+			Imports: []string{
+				"org.junit.jupiter.api.Test",
+				"org.junit.jupiter.api.extension.ExtendWith",
+				"org.mockito.InjectMocks",
+				"org.mockito.Mock",
+				"org.mockito.junit.jupiter.MockitoExtension",
+			},
+			Mocks: []scaffoldvo.TestMockField{
+				{Type: "CreateUserUseCase", FieldName: "createUserUseCase"},
+			},
+			TestMethods: []scaffoldvo.TestMethod{
+				{Name: "postUsers_shouldDoSomething", Body: "// TODO: implement test"},
+			},
+		}
+
+		out, err := reg.Render(context.Background(), in)
+		require.NoError(t, err)
+
+		got := string(out)
+		require.Contains(t, got, "package com.app.user.adapter.in.web;")
+		require.Contains(t, got, "@ExtendWith(MockitoExtension.class)")
+		require.Contains(t, got, "public class UserControllerTest {")
+		require.Contains(t, got, "@Mock")
+		require.Contains(t, got, "private CreateUserUseCase createUserUseCase;")
+		require.Contains(t, got, "@InjectMocks")
+		require.Contains(t, got, "private UserController userController;")
+		require.Contains(t, got, "@Test")
+		require.Contains(t, got, "void postUsers_shouldDoSomething()")
+		require.Contains(t, got, "// TODO: implement test")
+
+		extendIdx := strings.Index(got, "@ExtendWith")
+		classIdx := strings.Index(got, "public class UserControllerTest")
+		mockIdx := strings.Index(got, "@Mock")
+		injectIdx := strings.Index(got, "@InjectMocks")
+		testIdx := strings.Index(got, "@Test")
+		require.Less(t, extendIdx, classIdx, "@ExtendWith must appear before class declaration")
+		require.Less(t, mockIdx, injectIdx, "@Mock must appear before @InjectMocks")
+		require.Less(t, injectIdx, testIdx, "@InjectMocks must appear before @Test")
+	})
+
+	t.Run("Entity", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewTestRegistry()
+		in := scaffoldvo.TestRenderInput{
+			ContractType: "entity",
+			Package:      "com.app.user.domain",
+			ClassName:    "User",
+			Imports: []string{
+				"org.junit.jupiter.api.Test",
+			},
+			Mocks: nil,
+			TestMethods: []scaffoldvo.TestMethod{
+				{Name: "placeholder_shouldDoSomething", Body: "// TODO: implement test"},
+			},
+		}
+
+		out, err := reg.Render(context.Background(), in)
+		require.NoError(t, err)
+
+		got := string(out)
+		require.Contains(t, got, "package com.app.user.domain;")
+		require.Contains(t, got, "public class UserTest {")
+		require.Contains(t, got, "@Test")
+		require.Contains(t, got, "void placeholder_shouldDoSomething()")
+		require.Contains(t, got, "// TODO: implement test")
+		require.NotContains(t, got, "@ExtendWith")
+		require.NotContains(t, got, "@Mock")
+		require.NotContains(t, got, "@InjectMocks")
+	})
+
+	t.Run("AggregateRoot", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewTestRegistry()
+		in := scaffoldvo.TestRenderInput{
+			ContractType: "aggregate-root",
+			Package:      "com.app.order.domain",
+			ClassName:    "Order",
+			Imports: []string{
+				"org.junit.jupiter.api.Test",
+			},
+			Mocks: nil,
+			TestMethods: []scaffoldvo.TestMethod{
+				{Name: "placeholder_shouldDoSomething", Body: "// TODO: implement test"},
+			},
+		}
+
+		out, err := reg.Render(context.Background(), in)
+		require.NoError(t, err)
+
+		got := string(out)
+		require.Contains(t, got, "package com.app.order.domain;")
+		require.Contains(t, got, "public class OrderTest {")
+		require.Contains(t, got, "@Test")
+		require.Contains(t, got, "void placeholder_shouldDoSomething()")
+		require.Contains(t, got, "// TODO: implement test")
+		require.NotContains(t, got, "@ExtendWith")
+		require.NotContains(t, got, "@Mock")
+		require.NotContains(t, got, "@InjectMocks")
+	})
+
+	t.Run("AggregateRoot_ByteIdenticalToEntityApartFromClassName", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewTestRegistry()
+		entityIn := scaffoldvo.TestRenderInput{
+			ContractType: "entity",
+			Package:      "com.app.shared.domain",
+			ClassName:    "Foo",
+			Imports:      []string{"org.junit.jupiter.api.Test"},
+			TestMethods: []scaffoldvo.TestMethod{
+				{Name: "placeholder_shouldDoSomething", Body: "// TODO: implement test"},
+			},
+		}
+		aggregateIn := scaffoldvo.TestRenderInput{
+			ContractType: "aggregate-root",
+			Package:      "com.app.shared.domain",
+			ClassName:    "Foo",
+			Imports:      []string{"org.junit.jupiter.api.Test"},
+			TestMethods: []scaffoldvo.TestMethod{
+				{Name: "placeholder_shouldDoSomething", Body: "// TODO: implement test"},
+			},
+		}
+
+		entityOut, err := reg.Render(context.Background(), entityIn)
+		require.NoError(t, err)
+
+		aggregateOut, err := reg.Render(context.Background(), aggregateIn)
+		require.NoError(t, err)
+
+		require.Equal(t, entityOut, aggregateOut,
+			"entity and aggregate-root test templates must produce byte-identical output for the same input")
+	})
+
+	t.Run("UnsupportedType_ReturnsTypedError", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewTestRegistry()
+		in := scaffoldvo.TestRenderInput{
+			ContractType: "input-port",
+		}
+
+		_, err := reg.Render(context.Background(), in)
+		require.Error(t, err)
+
+		var typedErr *domerr.UnsupportedContractTypeError
+		require.True(t, errors.As(err, &typedErr))
+		require.Equal(t, "input-port", typedErr.Type)
+		require.NotEmpty(t, typedErr.SupportedSorted)
+
+		supported := typedErr.SupportedSorted
+		require.Contains(t, supported, "service")
+		require.Contains(t, supported, "rest-adapter")
+		require.Contains(t, supported, "entity")
+		require.Contains(t, supported, "aggregate-root")
+		require.NotContains(t, supported, "input-port",
+			"input-port must not appear in test registry supported list")
+		for i := 1; i < len(supported); i++ {
+			require.LessOrEqual(t, supported[i-1], supported[i],
+				"SupportedSorted must be sorted alphabetically")
+		}
+	})
+
+	t.Run("Deterministic", func(t *testing.T) {
+		t.Parallel()
+
+		reg := fsscaffold.NewTestRegistry()
+		in := scaffoldvo.TestRenderInput{
+			ContractType: "service",
+			Package:      "com.app.user.application",
+			ClassName:    "UserServiceImpl",
+			Imports: []string{
+				"org.junit.jupiter.api.Test",
+				"org.junit.jupiter.api.extension.ExtendWith",
+				"org.mockito.InjectMocks",
+				"org.mockito.Mock",
+				"org.mockito.junit.jupiter.MockitoExtension",
+			},
+			Mocks: []scaffoldvo.TestMockField{
+				{Type: "UserRepository", FieldName: "userRepository"},
+			},
+			TestMethods: []scaffoldvo.TestMethod{
+				{Name: "execute_shouldDoSomething", Body: "// TODO: implement test"},
+			},
+		}
+
+		first, err := reg.Render(context.Background(), in)
+		require.NoError(t, err)
+
+		second, err := reg.Render(context.Background(), in)
+		require.NoError(t, err)
+
+		require.Equal(t, first, second, "renders must be byte-identical (RNF-002)")
 	})
 }

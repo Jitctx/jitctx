@@ -74,10 +74,13 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	mdParser := mdspec.New()
 
 	scaffoldRegistry := fsscaffold.NewRegistry()
+	scaffoldTestRegistry := fsscaffold.NewTestRegistry()
 	scaffoldWriter := fsscaffold.NewMultiFileWriter()
 	importResolver := domspecsvc.NewJavaImportResolver(domspecsvc.NewContractPathMapper())
 	endpointSynth := domspecsvc.NewEndpointSynthesizer()
 	idUtils := domspecsvc.NewJavaIdentifierUtils()
+	testMapper := domspecsvc.NewTestPathMapper()
+	methodParser := domspecsvc.NewMethodSignatureParser()
 
 	return Deps{
 		ScanFactory: scanFactory,
@@ -98,10 +101,17 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			logger,
 		),
 		Scaffold: appscaffolduc.New(
-			specFinder, mdParser,
+			specFinder,
+			mdParser,
 			domspecsvc.NewContractPathMapper(),
-			importResolver, endpointSynth, idUtils,
-			scaffoldRegistry, scaffoldWriter,
+			testMapper,
+			importResolver,
+			endpointSynth,
+			idUtils,
+			methodParser,
+			scaffoldRegistry,
+			scaffoldTestRegistry,
+			scaffoldWriter,
 			logger,
 		),
 		WorkDir:  cfg.WorkDir,

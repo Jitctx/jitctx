@@ -13,14 +13,14 @@ import (
 )
 
 // MultiFileWriter implements spec.WriteProductionFilesPort by writing a batch
-// of rendered production files atomically per EP02RF-009.
+// of rendered production + test combined scaffold files atomically per EP02RF-009.
 type MultiFileWriter struct{}
 
 func NewMultiFileWriter() *MultiFileWriter { return &MultiFileWriter{} }
 
 var _ spec.WriteProductionFilesPort = (*MultiFileWriter)(nil)
 
-func (w *MultiFileWriter) WriteAll(ctx context.Context, files []scaffoldvo.ProductionFile) ([]string, error) {
+func (w *MultiFileWriter) WriteAll(ctx context.Context, files []scaffoldvo.ScaffoldFile) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

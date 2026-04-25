@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,14 +53,34 @@ func (f *fakeRenderer) Render(ctx context.Context, input scaffoldvo.RenderInput)
 	return f.render(ctx, input)
 }
 
-type fakeWriter struct {
-	writeAll  func(ctx context.Context, files []scaffoldvo.ProductionFile) ([]string, error)
+// fakeTestRenderer implements spec.RenderTestTemplatePort. It captures the
+// last TestRenderInput it received and returns a canned byte slice.
+type fakeTestRenderer struct {
+	render    func(ctx context.Context, input scaffoldvo.TestRenderInput) ([]byte, error)
 	callCount int
-	// lastFiles is the batch passed to WriteAll on the most recent call.
-	lastFiles []scaffoldvo.ProductionFile
+	// captured stores every TestRenderInput received, in order.
+	captured []scaffoldvo.TestRenderInput
 }
 
-func (f *fakeWriter) WriteAll(ctx context.Context, files []scaffoldvo.ProductionFile) ([]string, error) {
+func (f *fakeTestRenderer) Render(ctx context.Context, input scaffoldvo.TestRenderInput) ([]byte, error) {
+	f.callCount++
+	f.captured = append(f.captured, input)
+	if f.render != nil {
+		return f.render(ctx, input)
+	}
+	return []byte("// test stub"), nil
+}
+
+// fakeWriter implements spec.WriteProductionFilesPort. It tracks call count and
+// the last batch of ScaffoldFile values received.
+type fakeWriter struct {
+	writeAll  func(ctx context.Context, files []scaffoldvo.ScaffoldFile) ([]string, error)
+	callCount int
+	// lastFiles is the batch passed to WriteAll on the most recent call.
+	lastFiles []scaffoldvo.ScaffoldFile
+}
+
+func (f *fakeWriter) WriteAll(ctx context.Context, files []scaffoldvo.ScaffoldFile) ([]string, error) {
 	f.callCount++
 	f.lastFiles = files
 	return f.writeAll(ctx, files)
@@ -134,10 +155,15 @@ func rendererAlwaysSucceeds() *fakeRenderer {
 	}
 }
 
+// testRendererAlwaysSucceeds returns a fakeTestRenderer returning "// test stub".
+func testRendererAlwaysSucceeds() *fakeTestRenderer {
+	return &fakeTestRenderer{}
+}
+
 // writerReturnsPaths returns a fakeWriter that echoes back the paths it was given.
 func writerReturnsPaths() *fakeWriter {
 	return &fakeWriter{
-		writeAll: func(_ context.Context, files []scaffoldvo.ProductionFile) ([]string, error) {
+		writeAll: func(_ context.Context, files []scaffoldvo.ScaffoldFile) ([]string, error) {
 			paths := make([]string, len(files))
 			for i, f := range files {
 				paths[i] = f.Path
@@ -152,17 +178,20 @@ func newUC(
 	finder *fakeFinder,
 	parser *fakeParser,
 	renderer *fakeRenderer,
+	testRenderer *fakeTestRenderer,
 	writer *fakeWriter,
 	logger *slog.Logger,
 ) *scaffolduc.Impl {
 	mapper := service.NewContractPathMapper()
+	testMapper := service.NewTestPathMapper()
 	importResolver := service.NewJavaImportResolver(mapper)
 	endpointSynth := service.NewEndpointSynthesizer()
 	idUtils := service.NewJavaIdentifierUtils()
-	return scaffolduc.New(finder, parser, mapper, importResolver, endpointSynth, idUtils, renderer, writer, logger)
+	methodParser := service.NewMethodSignatureParser()
+	return scaffolduc.New(finder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, renderer, testRenderer, writer, logger)
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
+// ─── Existing Tests ───────────────────────────────────────────────────────────
 
 func TestScaffoldUseCase_HappyPath_FourContracts(t *testing.T) {
 	t.Parallel()
@@ -170,9 +199,10 @@ func TestScaffoldUseCase_HappyPath_FourContracts(t *testing.T) {
 	finder := finderReturnsPath()
 	parser := parserReturns(canonicalSpec())
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finder, parser, renderer, writer, nopLogger())
+	uc := newUC(finder, parser, renderer, testRenderer, writer, nopLogger())
 	out, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -182,29 +212,32 @@ func TestScaffoldUseCase_HappyPath_FourContracts(t *testing.T) {
 	require.Equal(t, "create-user", out.Feature)
 	require.Equal(t, "user-management", out.Module)
 	require.Equal(t, "com.app.user", out.Package)
-	require.Len(t, out.WrittenPaths, 4)
+	// 4 production + 2 testable (service + rest-adapter + entity/aggregate) contracts.
+	// canonicalSpec has: input-port (no test), output-port (no test), service (test), rest-adapter (test).
+	// So 4 production + 2 test = 6 total.
+	require.Len(t, out.WrittenPaths, 6)
 
 	// Renderer must have been called once per contract.
 	require.Equal(t, 4, renderer.callCount)
 
-	// Writer must have been called exactly once with all 4 files.
+	// Writer must have been called exactly once with all files.
 	require.Equal(t, 1, writer.callCount)
-	require.Len(t, writer.lastFiles, 4)
+	require.Len(t, writer.lastFiles, 6)
 
-	// Assert exact generated paths for each contract.
-	wantPaths := []string{
+	// Assert exact generated production paths for each contract.
+	wantProductionPaths := []string{
 		"/work/src/main/java/com/app/user/port/in/CreateUserUseCase.java",
 		"/work/src/main/java/com/app/user/port/out/UserRepository.java",
 		"/work/src/main/java/com/app/user/application/UserServiceImpl.java",
 		"/work/src/main/java/com/app/user/adapter/in/web/UserController.java",
 	}
-	// WrittenPaths is what the writer returned (which echoes the paths we sent).
-	// The batch order matches declaration order in the spec.
-	gotPaths := make([]string, len(writer.lastFiles))
-	for i, f := range writer.lastFiles {
-		gotPaths[i] = f.Path
+	gotProductionPaths := make([]string, 0, 4)
+	for _, f := range writer.lastFiles {
+		if f.Kind == scaffoldvo.KindProduction {
+			gotProductionPaths = append(gotProductionPaths, f.Path)
+		}
 	}
-	require.Equal(t, wantPaths, gotPaths)
+	require.Equal(t, wantProductionPaths, gotProductionPaths)
 }
 
 func TestScaffoldUseCase_MissingPackage_ErrSpecMissingPackage(t *testing.T) {
@@ -214,9 +247,10 @@ func TestScaffoldUseCase_MissingPackage_ErrSpecMissingPackage(t *testing.T) {
 	spec.Package = ""
 
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, writer, nopLogger())
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -241,9 +275,10 @@ func TestScaffoldUseCase_UnsupportedContractType_ShortCircuits(t *testing.T) {
 	}
 
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finderReturnsPath(), parserReturns(weirdSpec), renderer, writer, nopLogger())
+	uc := newUC(finderReturnsPath(), parserReturns(weirdSpec), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "weird",
 		BaseDir: "/work",
@@ -263,13 +298,14 @@ func TestScaffoldUseCase_ConflictPropagated(t *testing.T) {
 
 	conflictErr := &domerr.ScaffoldConflictError{Conflicts: []string{"/x.java"}}
 	writer := &fakeWriter{
-		writeAll: func(_ context.Context, _ []scaffoldvo.ProductionFile) ([]string, error) {
+		writeAll: func(_ context.Context, _ []scaffoldvo.ScaffoldFile) ([]string, error) {
 			return nil, conflictErr
 		},
 	}
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 
-	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -291,9 +327,10 @@ func TestScaffoldUseCase_RenderFailurePropagated(t *testing.T) {
 			return nil, renderBoom
 		},
 	}
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -314,9 +351,10 @@ func TestScaffoldUseCase_ImportsInRenderInput(t *testing.T) {
 	t.Parallel()
 
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -343,9 +381,10 @@ func TestScaffoldUseCase_OverrideMethodsForServiceFromImplementsTarget(t *testin
 	t.Parallel()
 
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -370,9 +409,10 @@ func TestScaffoldUseCase_EndpointsForRestAdapter(t *testing.T) {
 	t.Parallel()
 
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -394,9 +434,10 @@ func TestScaffoldUseCase_DependenciesGenerated(t *testing.T) {
 	t.Parallel()
 
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -425,9 +466,10 @@ func TestScaffoldUseCase_MutuallyExclusive_FeatureAndFile(t *testing.T) {
 		},
 	}
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finder, parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finder, parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		Feature:  "create-user",
 		FilePath: "/some/path.md",
@@ -449,9 +491,10 @@ func TestScaffoldUseCase_Validation_NoneSet(t *testing.T) {
 		},
 	}
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finder, parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finder, parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		BaseDir: "/work",
 	})
@@ -475,9 +518,10 @@ func TestScaffoldUseCase_WithFile_BypassesFinder(t *testing.T) {
 		},
 	}
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
-	uc := newUC(finder, parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finder, parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
 		FilePath: specPath,
 		BaseDir:  "/work",
@@ -498,12 +542,13 @@ func TestScaffoldUseCase_CtxCancelled(t *testing.T) {
 		},
 	}
 	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
 	writer := writerReturnsPaths()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	uc := newUC(finder, parserReturns(canonicalSpec()), renderer, writer, nopLogger())
+	uc := newUC(finder, parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
 	_, err := uc.Execute(ctx, scaffoldvo.ScaffoldInput{
 		Feature: "create-user",
 		BaseDir: "/work",
@@ -511,4 +556,310 @@ func TestScaffoldUseCase_CtxCancelled(t *testing.T) {
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 0, finder.callCount)
+}
+
+// ─── New Test Scenarios (T6-G5) ───────────────────────────────────────────────
+
+// TestScaffoldUseCase_ServiceContract_ProducesTestFile asserts that a service
+// contract produces a ScaffoldFile{Kind: KindTest} whose Path ends with the
+// expected test file path AND whose TestRenderInput.Mocks lists UserRepository.
+func TestScaffoldUseCase_ServiceContract_ProducesTestFile(t *testing.T) {
+	t.Parallel()
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	// Find the test file for UserServiceImpl in the batch.
+	var serviceTestFile *scaffoldvo.ScaffoldFile
+	for i := range writer.lastFiles {
+		f := &writer.lastFiles[i]
+		if f.Kind == scaffoldvo.KindTest && strings.HasSuffix(f.Path, "UserServiceImplTest.java") {
+			serviceTestFile = f
+			break
+		}
+	}
+	require.NotNil(t, serviceTestFile, "expected a KindTest ScaffoldFile for UserServiceImplTest.java")
+	require.True(t, strings.Contains(serviceTestFile.Path, "src/test/java"),
+		"test file path must contain src/test/java, got %s", serviceTestFile.Path)
+
+	// Find the captured TestRenderInput for UserServiceImpl.
+	var serviceTestInput *scaffoldvo.TestRenderInput
+	for i := range testRenderer.captured {
+		inp := &testRenderer.captured[i]
+		if inp.ClassName == "UserServiceImpl" {
+			serviceTestInput = inp
+			break
+		}
+	}
+	require.NotNil(t, serviceTestInput, "expected a captured TestRenderInput for UserServiceImpl")
+
+	// Mocks must list UserRepository.
+	require.Len(t, serviceTestInput.Mocks, 1)
+	require.Equal(t, "UserRepository", serviceTestInput.Mocks[0].Type)
+	require.Equal(t, "userRepository", serviceTestInput.Mocks[0].FieldName)
+}
+
+// TestScaffoldUseCase_RestAdapter_MocksIsDedup asserts that a rest-adapter
+// contract's Mocks is the dedup of Uses + DependsOn.
+func TestScaffoldUseCase_RestAdapter_MocksIsDedup(t *testing.T) {
+	t.Parallel()
+
+	// Build a spec with a rest-adapter that has both Uses and DependsOn,
+	// with an intentional overlap to verify dedup.
+	spec := model.FeatureSpec{
+		Feature: "checkout",
+		Module:  "order",
+		Package: "com.app.order",
+		Contracts: []model.SpecContract{
+			{
+				Name:      "OrderController",
+				Type:      model.ContractRestAdapter,
+				Uses:      []string{"PlaceOrderUseCase", "SharedService"},
+				DependsOn: []string{"SharedService", "OrderMetrics"},
+				Endpoints: []string{"POST /orders"},
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "checkout",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, testRenderer.captured, 1)
+	inp := testRenderer.captured[0]
+	require.Equal(t, "OrderController", inp.ClassName)
+
+	// DependsOn=[SharedService, OrderMetrics], Uses=[PlaceOrderUseCase, SharedService]
+	// dedup(DependsOn + Uses) = [SharedService, OrderMetrics, PlaceOrderUseCase] (first-occurrence order)
+	// Wait — the usecase does: dedup(append(DependsOn..., Uses...))
+	// So order is: DependsOn first: SharedService, OrderMetrics; then Uses: PlaceOrderUseCase, SharedService(dup)
+	// dedup result: [SharedService, OrderMetrics, PlaceOrderUseCase]
+	mockTypes := make([]string, len(inp.Mocks))
+	for i, m := range inp.Mocks {
+		mockTypes[i] = m.Type
+	}
+	// Verify no duplicates.
+	seen := make(map[string]int)
+	for _, mt := range mockTypes {
+		seen[mt]++
+	}
+	for typ, count := range seen {
+		require.Equal(t, 1, count, "mock type %q appears more than once", typ)
+	}
+	// Verify all three unique types are present.
+	require.Contains(t, mockTypes, "PlaceOrderUseCase")
+	require.Contains(t, mockTypes, "SharedService")
+	require.Contains(t, mockTypes, "OrderMetrics")
+}
+
+// TestScaffoldUseCase_Entity_ExactlyOnePlaceholderTestMethod asserts that an
+// entity contract produces exactly one TestMethod with the placeholder name.
+func TestScaffoldUseCase_Entity_ExactlyOnePlaceholderTestMethod(t *testing.T) {
+	t.Parallel()
+
+	spec := model.FeatureSpec{
+		Feature: "order",
+		Module:  "order",
+		Package: "com.app.order",
+		Contracts: []model.SpecContract{
+			{
+				Name: "Order",
+				Type: model.ContractEntity,
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "order",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, testRenderer.captured, 1)
+	inp := testRenderer.captured[0]
+	require.Equal(t, "Order", inp.ClassName)
+	require.Len(t, inp.TestMethods, 1)
+	require.Equal(t, "placeholder_shouldDoSomething", inp.TestMethods[0].Name)
+	require.Equal(t, "// TODO: implement test", inp.TestMethods[0].Body)
+}
+
+// TestScaffoldUseCase_AggregateRoot_ExactlyOnePlaceholderTestMethod asserts the
+// same as the entity case but for aggregate-root.
+func TestScaffoldUseCase_AggregateRoot_ExactlyOnePlaceholderTestMethod(t *testing.T) {
+	t.Parallel()
+
+	spec := model.FeatureSpec{
+		Feature: "product",
+		Module:  "catalog",
+		Package: "com.app.catalog",
+		Contracts: []model.SpecContract{
+			{
+				Name: "Product",
+				Type: model.ContractAggregate,
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "product",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, testRenderer.captured, 1)
+	inp := testRenderer.captured[0]
+	require.Equal(t, "Product", inp.ClassName)
+	require.Len(t, inp.TestMethods, 1)
+	require.Equal(t, "placeholder_shouldDoSomething", inp.TestMethods[0].Name)
+}
+
+// TestScaffoldUseCase_InterfaceContracts_NoTestFile asserts that input-port and
+// output-port contracts produce NO test file in the batch handed to the writer.
+func TestScaffoldUseCase_InterfaceContracts_NoTestFile(t *testing.T) {
+	t.Parallel()
+
+	spec := model.FeatureSpec{
+		Feature: "create-user",
+		Module:  "user",
+		Package: "com.app.user",
+		Contracts: []model.SpecContract{
+			{
+				Name:    "CreateUserUseCase",
+				Type:    model.ContractInputPort,
+				Methods: []string{"void execute(CreateUserCommand cmd)"},
+			},
+			{
+				Name: "UserRepository",
+				Type: model.ContractOutputPort,
+				Methods: []string{
+					"Optional<User> findByEmail(String email)",
+				},
+			},
+		},
+	}
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(spec), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	// No test files must appear in the batch.
+	for _, f := range writer.lastFiles {
+		require.NotEqual(t, scaffoldvo.KindTest, f.Kind,
+			"unexpected test file in batch for interface contract: %s", f.Path)
+	}
+
+	// testRenderer must not have been called at all.
+	require.Equal(t, 0, testRenderer.callCount)
+}
+
+// TestScaffoldUseCase_SingleWriteAllCall asserts that the merged batch is
+// passed in exactly ONE call to writer.WriteAll per Execute invocation.
+func TestScaffoldUseCase_SingleWriteAllCall(t *testing.T) {
+	t.Parallel()
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, 1, writer.callCount, "writer.WriteAll must be called exactly once per Execute")
+}
+
+// TestScaffoldUseCase_OutputCountersPopulated asserts that ScaffoldOutput
+// ProductionCount and TestCount are populated correctly.
+func TestScaffoldUseCase_OutputCountersPopulated(t *testing.T) {
+	t.Parallel()
+
+	// canonicalSpec has:
+	//   - CreateUserUseCase (input-port):  production=yes, test=no
+	//   - UserRepository (output-port):    production=yes, test=no
+	//   - UserServiceImpl (service):       production=yes, test=yes
+	//   - UserController (rest-adapter):   production=yes, test=yes
+	// Expected: ProductionCount=4, TestCount=2
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
+	out, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, 4, out.ProductionCount)
+	require.Equal(t, 2, out.TestCount)
+}
+
+// TestScaffoldUseCase_MethodNameFreeze asserts that for UserServiceImpl whose
+// Implements points to CreateUserUseCase with method "execute(...)", the test
+// method name emitted is "execute_shouldDoSomething".
+func TestScaffoldUseCase_MethodNameFreeze(t *testing.T) {
+	t.Parallel()
+
+	renderer := rendererAlwaysSucceeds()
+	testRenderer := testRendererAlwaysSucceeds()
+	writer := writerReturnsPaths()
+
+	uc := newUC(finderReturnsPath(), parserReturns(canonicalSpec()), renderer, testRenderer, writer, nopLogger())
+	_, err := uc.Execute(context.Background(), scaffoldvo.ScaffoldInput{
+		Feature: "create-user",
+		BaseDir: "/work",
+	})
+	require.NoError(t, err)
+
+	// Find the captured TestRenderInput for UserServiceImpl.
+	var serviceTestInput *scaffoldvo.TestRenderInput
+	for i := range testRenderer.captured {
+		inp := &testRenderer.captured[i]
+		if inp.ClassName == "UserServiceImpl" {
+			serviceTestInput = inp
+			break
+		}
+	}
+	require.NotNil(t, serviceTestInput, "expected a captured TestRenderInput for UserServiceImpl")
+
+	// CreateUserUseCase has one method: "UserResponse execute(CreateUserCommand cmd)".
+	// The test method name must be "execute_shouldDoSomething".
+	require.Len(t, serviceTestInput.TestMethods, 1)
+	require.Equal(t, "execute_shouldDoSomething", serviceTestInput.TestMethods[0].Name)
+	require.Equal(t, "// TODO: implement test", serviceTestInput.TestMethods[0].Body)
 }

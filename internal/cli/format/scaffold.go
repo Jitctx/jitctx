@@ -13,15 +13,25 @@ import (
 // Format:
 //
 //	scaffolded: <feature> (module: <module>, package: <pkg>)
-//	wrote N files:
+//	wrote N files (P production, T test):
 //	  - <abs path 1>
 //	  - <abs path 2>
+//
+// The parenthetical "(P production, T test)" is omitted when both
+// ProductionCount and TestCount are zero.
 func WriteScaffoldText(w io.Writer, out scaffoldvo.ScaffoldOutput) error {
 	if _, err := fmt.Fprintf(w, "scaffolded: %s (module: %s, package: %s)\n",
 		out.Feature, out.Module, out.Package); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "wrote %d files:\n", len(out.WrittenPaths)); err != nil {
+	var header string
+	if out.ProductionCount == 0 && out.TestCount == 0 {
+		header = fmt.Sprintf("wrote %d files:\n", len(out.WrittenPaths))
+	} else {
+		header = fmt.Sprintf("wrote %d files (%d production, %d test):\n",
+			len(out.WrittenPaths), out.ProductionCount, out.TestCount)
+	}
+	if _, err := fmt.Fprint(w, header); err != nil {
 		return err
 	}
 	for _, p := range out.WrittenPaths {
@@ -34,10 +44,12 @@ func WriteScaffoldText(w io.Writer, out scaffoldvo.ScaffoldOutput) error {
 
 // scaffoldOutputJSON is the private JSON DTO for WriteScaffoldJSON.
 type scaffoldOutputJSON struct {
-	Feature string   `json:"feature"`
-	Module  string   `json:"module"`
-	Package string   `json:"package"`
-	Written []string `json:"written"`
+	Feature         string   `json:"feature"`
+	Module          string   `json:"module"`
+	Package         string   `json:"package"`
+	Written         []string `json:"written"`
+	ProductionCount int      `json:"production_count"`
+	TestCount       int      `json:"test_count"`
 }
 
 // WriteScaffoldJSON renders a ScaffoldOutput as indented JSON to w.
@@ -48,10 +60,12 @@ func WriteScaffoldJSON(w io.Writer, out scaffoldvo.ScaffoldOutput) error {
 		written = []string{}
 	}
 	dto := scaffoldOutputJSON{
-		Feature: out.Feature,
-		Module:  out.Module,
-		Package: out.Package,
-		Written: written,
+		Feature:         out.Feature,
+		Module:          out.Module,
+		Package:         out.Package,
+		Written:         written,
+		ProductionCount: out.ProductionCount,
+		TestCount:       out.TestCount,
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

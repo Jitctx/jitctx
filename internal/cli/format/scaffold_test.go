@@ -13,10 +13,12 @@ import (
 
 func fixtureScaffoldOutput() scaffoldvo.ScaffoldOutput {
 	return scaffoldvo.ScaffoldOutput{
-		Feature:      "create-user",
-		Module:       "user-management",
-		Package:      "com.app.user",
-		WrittenPaths: []string{"/abs/A.java", "/abs/B.java"},
+		Feature:         "create-user",
+		Module:          "user-management",
+		Package:         "com.app.user",
+		WrittenPaths:    []string{"/abs/A.java", "/abs/B.java"},
+		ProductionCount: 1,
+		TestCount:       1,
 	}
 }
 
@@ -29,7 +31,7 @@ func TestWriteScaffoldText_HappyPath(t *testing.T) {
 
 	got := buf.String()
 	require.Contains(t, got, "scaffolded: create-user (module: user-management, package: com.app.user)")
-	require.Contains(t, got, "wrote 2 files:")
+	require.Contains(t, got, "wrote 2 files (1 production, 1 test):")
 	require.Contains(t, got, "  - /abs/A.java")
 	require.Contains(t, got, "  - /abs/B.java")
 }
@@ -38,10 +40,12 @@ func TestWriteScaffoldText_ZeroFiles(t *testing.T) {
 	t.Parallel()
 
 	out := scaffoldvo.ScaffoldOutput{
-		Feature:      "create-user",
-		Module:       "user-management",
-		Package:      "com.app.user",
-		WrittenPaths: []string{},
+		Feature:         "create-user",
+		Module:          "user-management",
+		Package:         "com.app.user",
+		WrittenPaths:    []string{},
+		ProductionCount: 0,
+		TestCount:       0,
 	}
 
 	var buf bytes.Buffer
@@ -50,6 +54,8 @@ func TestWriteScaffoldText_ZeroFiles(t *testing.T) {
 
 	got := buf.String()
 	require.Contains(t, got, "wrote 0 files:")
+	require.NotContains(t, got, "production")
+	require.NotContains(t, got, "test)")
 	require.NotContains(t, got, "  - ")
 }
 
@@ -70,6 +76,9 @@ func TestWriteScaffoldJSON_Shape(t *testing.T) {
 	written, ok := m["written"].([]any)
 	require.True(t, ok, "expected 'written' to be an array")
 	require.Len(t, written, 2)
+
+	require.Equal(t, float64(1), m["production_count"], "production_count must be present and equal 1")
+	require.Equal(t, float64(1), m["test_count"], "test_count must be present and equal 1")
 }
 
 func TestWriteScaffoldJSON_NeverNullArray(t *testing.T) {

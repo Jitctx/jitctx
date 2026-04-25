@@ -1,0 +1,22 @@
+package {{.Package}};
+{{range .Imports}}
+import {{.}};
+{{- end}}
+
+@ExtendWith(MockitoExtension.class)
+public class {{.ClassName}}Test {
+{{range .Mocks}}
+    @Mock
+    private {{.Type}} {{.FieldName}};
+{{- end}}
+
+    @InjectMocks
+    private {{.ClassName}} {{lcFirst .ClassName}};
+{{range .TestMethods}}
+
+    @Test
+    void {{.Name}}() {
+        {{.Body}}
+    }
+{{- end}}
+}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
@@ -26,10 +27,13 @@ type Impl struct {
 	finder         spec.FindSpecFilePort
 	parser         spec.ParseSpecPort
 	mapper         service.ContractPathMapper
+	testMapper     service.TestPathMapper
 	importResolver service.JavaImportResolver
 	endpointSynth  service.EndpointSynthesizer
 	idUtils        service.JavaIdentifierUtils
+	methodParser   service.MethodSignatureParser
 	renderer       spec.RenderProductionTemplatePort
+	testRenderer   spec.RenderTestTemplatePort
 	writer         spec.WriteProductionFilesPort
 	logger         *slog.Logger
 }
@@ -39,10 +43,13 @@ func New(
 	finder spec.FindSpecFilePort,
 	parser spec.ParseSpecPort,
 	mapper service.ContractPathMapper,
+	testMapper service.TestPathMapper,
 	importResolver service.JavaImportResolver,
 	endpointSynth service.EndpointSynthesizer,
 	idUtils service.JavaIdentifierUtils,
+	methodParser service.MethodSignatureParser,
 	renderer spec.RenderProductionTemplatePort,
+	testRenderer spec.RenderTestTemplatePort,
 	writer spec.WriteProductionFilesPort,
 	logger *slog.Logger,
 ) *Impl {
@@ -50,17 +57,21 @@ func New(
 		finder:         finder,
 		parser:         parser,
 		mapper:         mapper,
+		testMapper:     testMapper,
 		importResolver: importResolver,
 		endpointSynth:  endpointSynth,
 		idUtils:        idUtils,
+		methodParser:   methodParser,
 		renderer:       renderer,
+		testRenderer:   testRenderer,
 		writer:         writer,
 		logger:         logger,
 	}
 }
 
-// Execute generates production Java source files for every contract in the
-// resolved feature spec and atomically writes them to disk.
+// Execute generates production and test Java source files for every contract
+// in the resolved feature spec and atomically writes them to disk in one
+// merged batch (EP02RF-009).
 func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffoldvo.ScaffoldOutput, error) {
 	// Step 1: ctx.Err() guard.
 	if err := ctx.Err(); err != nil {
@@ -117,13 +128,28 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 		return scaffoldvo.ScaffoldOutput{}, domerr.ErrSpecMissingPackage
 	}
 
-	// Step 6: Build batch.
-	var batch []scaffoldvo.ProductionFile
+	// Step 6: Build production batch entries.
+	// The batch holds the unified set of production + test files.
+	var batch []scaffoldvo.ScaffoldFile
+	productionCount := 0
+	testCount := 0
 
-	// Build a name → SpecContract index for Implements lookup.
+	// Build a name → SpecContract index for Implements lookup and test import resolution.
 	contractIndex := make(map[string]model.SpecContract, len(parsed.Contracts))
 	for _, c := range parsed.Contracts {
 		contractIndex[c.Name] = c
+	}
+
+	// Build production relPath index for test FQN resolution.
+	productionRelPaths := make(map[string]string, len(parsed.Contracts))
+	for _, c := range parsed.Contracts {
+		relPath, err := u.mapper.Map(c.Type, c.Name)
+		if err != nil {
+			return scaffoldvo.ScaffoldOutput{}, err
+		}
+		if relPath != "" {
+			productionRelPaths[c.Name] = relPath
+		}
 	}
 
 	for _, c := range parsed.Contracts {
@@ -272,24 +298,213 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 			return scaffoldvo.ScaffoldOutput{}, &domerr.ScaffoldRenderError{Contract: c.Name, Cause: err}
 		}
 
-		// 6.5: Append to batch.
-		batch = append(batch, scaffoldvo.ProductionFile{Path: abs, Content: body})
+		// 6.5: Append production file to batch (wrapped in ScaffoldFile).
+		batch = append(batch, scaffoldvo.ScaffoldFile{
+			Path:    abs,
+			Content: body,
+			Kind:    scaffoldvo.KindProduction,
+		})
+		productionCount++
 	}
 
-	// Step 7: Single atomic write call.
+	// Step 6b: Build test batch entries.
+	for _, c := range parsed.Contracts {
+		// 6b.1: Map contract to test relative path.
+		relPath, err := u.testMapper.Map(c.Type, c.Name)
+		if err != nil {
+			// Genuine unsupported contract type — return as-is.
+			return scaffoldvo.ScaffoldOutput{}, err
+		}
+		if relPath == "" {
+			// Intentionally non-testable (input-port, output-port, jpa-adapter).
+			u.logger.Debug("skipping non-testable contract", slog.String("name", c.Name), slog.String("type", string(c.Type)))
+			continue
+		}
+
+		// 6b.2: Compute test absolute path.
+		packagePath := strings.ReplaceAll(parsed.Package, ".", "/")
+		testAbs := filepath.Join(in.BaseDir, "src/test/java", packagePath, relPath)
+
+		// 6b.3: Derive the production relPath to compute full package.
+		prodRelPath := productionRelPaths[c.Name]
+		subPackage := u.idUtils.PackageFromRelativePath(prodRelPath)
+		fullPackage := parsed.Package
+		if subPackage != "" {
+			fullPackage = parsed.Package + "." + subPackage
+		}
+
+		// 6b.4: Build Mocks.
+		var mocks []scaffoldvo.TestMockField
+		switch c.Type {
+		case model.ContractService:
+			for _, n := range c.DependsOn {
+				mocks = append(mocks, scaffoldvo.TestMockField{
+					Type:      n,
+					FieldName: u.idUtils.FieldNameFromType(n),
+				})
+			}
+		case model.ContractRestAdapter:
+			combined := dedupStrings(append(append([]string(nil), c.DependsOn...), c.Uses...))
+			for _, n := range combined {
+				mocks = append(mocks, scaffoldvo.TestMockField{
+					Type:      n,
+					FieldName: u.idUtils.FieldNameFromType(n),
+				})
+			}
+		case model.ContractEntity, model.ContractAggregate:
+			mocks = nil
+		}
+
+		// 6b.5: Build TestMethods.
+		var testMethods []scaffoldvo.TestMethod
+		switch c.Type {
+		case model.ContractService:
+			// For service: parse each c.Methods entry via methodParser.
+			// If c.Methods is empty (implements target provides methods), try the implements target.
+			methodSources := c.Methods
+			if len(methodSources) == 0 && c.Implements != "" {
+				if implTarget, found := contractIndex[c.Implements]; found {
+					methodSources = implTarget.Methods
+				}
+			}
+			for _, m := range methodSources {
+				pm, err := u.methodParser.Parse(m)
+				if err != nil {
+					return scaffoldvo.ScaffoldOutput{}, &domerr.ScaffoldRenderError{Contract: c.Name, Cause: err}
+				}
+				testMethods = append(testMethods, scaffoldvo.TestMethod{
+					Name: pm.Name + "_shouldDoSomething",
+					Body: "// TODO: implement test",
+				})
+			}
+		case model.ContractRestAdapter:
+			// For rest-adapter: parse each c.Methods entry. When c.Methods is empty,
+			// derive method names from endpoints via endpointSynth.
+			if len(c.Methods) > 0 {
+				for _, m := range c.Methods {
+					pm, err := u.methodParser.Parse(m)
+					if err != nil {
+						return scaffoldvo.ScaffoldOutput{}, &domerr.ScaffoldRenderError{Contract: c.Name, Cause: err}
+					}
+					testMethods = append(testMethods, scaffoldvo.TestMethod{
+						Name: pm.Name + "_shouldDoSomething",
+						Body: "// TODO: implement test",
+					})
+				}
+			} else {
+				// Derive method names from endpoints.
+				for _, raw := range c.Endpoints {
+					eb, err := u.endpointSynth.Parse(raw)
+					if err != nil {
+						return scaffoldvo.ScaffoldOutput{}, fmt.Errorf("parse endpoint %q: %w", raw, err)
+					}
+					testMethods = append(testMethods, scaffoldvo.TestMethod{
+						Name: eb.MethodName + "_shouldDoSomething",
+						Body: "// TODO: implement test",
+					})
+				}
+			}
+		case model.ContractEntity, model.ContractAggregate:
+			// One placeholder test method.
+			testMethods = []scaffoldvo.TestMethod{
+				{Name: "placeholder_shouldDoSomething", Body: "// TODO: implement test"},
+			}
+		}
+
+		// 6b.6: Build Imports.
+		testImports := buildTestImports(c.Type, mocks, contractIndex, productionRelPaths, parsed.Package, u.idUtils)
+
+		// 6b.7: Assemble TestRenderInput.
+		tvm := scaffoldvo.TestRenderInput{
+			ContractType: string(c.Type),
+			Package:      fullPackage,
+			ClassName:    c.Name,
+			Imports:      testImports,
+			Mocks:        mocks,
+			TestMethods:  testMethods,
+		}
+
+		// 6b.8: Render test.
+		testBody, err := u.testRenderer.Render(ctx, tvm)
+		if err != nil {
+			return scaffoldvo.ScaffoldOutput{}, &domerr.ScaffoldRenderError{Contract: c.Name, Cause: err}
+		}
+
+		// 6b.9: Append test file to batch.
+		batch = append(batch, scaffoldvo.ScaffoldFile{
+			Path:    testAbs,
+			Content: testBody,
+			Kind:    scaffoldvo.KindTest,
+		})
+		testCount++
+	}
+
+	// Step 7: Single atomic write call — ONE merged batch (production + test).
 	written, err := u.writer.WriteAll(ctx, batch)
 	if err != nil {
 		return scaffoldvo.ScaffoldOutput{}, err
 	}
 
-	// Step 8: Log + return.
-	u.logger.Info("scaffolded", slog.String("feature", parsed.Feature), slog.Int("count", len(written)))
+	// Step 8: Log + return with counters.
+	u.logger.Info("scaffolded",
+		slog.String("feature", parsed.Feature),
+		slog.Int("production", productionCount),
+		slog.Int("test", testCount),
+		slog.Int("total", len(written)),
+	)
 	return scaffoldvo.ScaffoldOutput{
-		Feature:      parsed.Feature,
-		Module:       parsed.Module,
-		Package:      parsed.Package,
-		WrittenPaths: written,
+		Feature:         parsed.Feature,
+		Module:          parsed.Module,
+		Package:         parsed.Package,
+		WrittenPaths:    written,
+		ProductionCount: productionCount,
+		TestCount:       testCount,
 	}, nil
+}
+
+// buildTestImports constructs the sorted import list for a test class.
+//
+//   - Always includes org.junit.jupiter.api.Test.
+//   - For service / rest-adapter: adds the four Mockito FQNs plus the FQN
+//     of each mock type (if resolvable from the contract index).
+//   - SUT FQN is OMITTED because the test shares the production package.
+func buildTestImports(
+	contractType model.ContractType,
+	mocks []scaffoldvo.TestMockField,
+	contractIndex map[string]model.SpecContract,
+	productionRelPaths map[string]string,
+	modulePackage string,
+	idUtils service.JavaIdentifierUtils,
+) []string {
+	importSet := make(map[string]struct{})
+	importSet["org.junit.jupiter.api.Test"] = struct{}{}
+
+	switch contractType {
+	case model.ContractService, model.ContractRestAdapter:
+		importSet["org.junit.jupiter.api.extension.ExtendWith"] = struct{}{}
+		importSet["org.mockito.InjectMocks"] = struct{}{}
+		importSet["org.mockito.Mock"] = struct{}{}
+		importSet["org.mockito.junit.jupiter.MockitoExtension"] = struct{}{}
+
+		// For each mock, attempt FQN resolution via the contract index.
+		for _, m := range mocks {
+			if _, found := contractIndex[m.Type]; found {
+				if relPath, ok := productionRelPaths[m.Type]; ok {
+					fqn := idUtils.FQN(modulePackage, relPath, m.Type)
+					importSet[fqn] = struct{}{}
+				}
+			}
+			// External types (not in contract index) are skipped silently.
+		}
+	}
+
+	// Build sorted slice.
+	result := make([]string, 0, len(importSet))
+	for imp := range importSet {
+		result = append(result, imp)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // dedupStrings returns in with duplicates removed, preserving first occurrence order.
