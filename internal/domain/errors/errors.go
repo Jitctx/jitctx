@@ -16,6 +16,9 @@ var (
 	ErrParseFailure   = errors.New("java parse failure") // fatal parse (not partial)
 	ErrPartialParse   = errors.New("java partial parse") // recoverable, file skipped
 	ErrManifestWrite  = errors.New("manifest write failed")
+
+	// US-001 (spec parser) sentinels
+	ErrSpecParse = errors.New("spec parse error") // sentinel for all fatal spec parse errors
 )
 
 type ProfileConflictError struct {
@@ -46,4 +49,47 @@ func (e *ModuleNotFoundError) Error() string {
 // call-sites keep working after we introduce the typed variant.
 func (e *ModuleNotFoundError) Is(target error) bool {
 	return errors.Is(target, ErrModuleNotFound)
+}
+
+// SpecParseError carries structured information about a fatal parse failure.
+type SpecParseError struct {
+	Line    int    // 1-based line number where the error was detected
+	Message string // human-readable description
+}
+
+func (e *SpecParseError) Error() string {
+	return fmt.Sprintf("line %d: %s", e.Line, e.Message)
+}
+
+func (e *SpecParseError) Is(target error) bool {
+	return target == ErrSpecParse
+}
+
+// SpecParseWarning represents a non-fatal parse issue (unknown field, etc.).
+// Warnings are collected during parsing and logged to stderr; they do not
+// abort the parse.
+type SpecParseWarning struct {
+	Line    int
+	Message string
+}
+
+func (w *SpecParseWarning) Error() string {
+	return fmt.Sprintf("line %d: %s", w.Line, w.Message)
+}
+
+// DuplicateContractError is a specific fatal error for duplicate contract names.
+// It records both occurrence line numbers for the user-facing message.
+type DuplicateContractError struct {
+	Name      string
+	FirstLine int
+	DupeLine  int
+}
+
+func (e *DuplicateContractError) Error() string {
+	return fmt.Sprintf("duplicate contract name '%s' (first at line %d, again at line %d)",
+		e.Name, e.FirstLine, e.DupeLine)
+}
+
+func (e *DuplicateContractError) Is(target error) bool {
+	return target == ErrSpecParse
 }
