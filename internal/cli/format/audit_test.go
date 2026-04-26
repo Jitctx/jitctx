@@ -310,3 +310,104 @@ func TestWriteAuditReport_NoProfileNameOmitsHeader(t *testing.T) {
 
 	require.NotContains(t, buf.String(), "<!-- jitctx audit")
 }
+
+// TestWriteAuditReport_US007_AlwaysRendersBothHeadings_CleanProject is a
+// regression test for EP03US-007, scenario: clean project with no violations.
+// It asserts that both top-level headings are always present, appear exactly
+// once, and maintain the mandated visual order (sintatic before semantic).
+func TestWriteAuditReport_US007_AlwaysRendersBothHeadings_CleanProject(t *testing.T) {
+	t.Parallel()
+
+	out := auditvo.AuditProjectOutput{
+		ProfileName:         "hexagonal-java",
+		ManifestPath:        "project-state.yaml",
+		Modules:             nil,
+		Sintatic:            nil,
+		SemanticPlaceholder: auditvo.SemanticPlaceholder,
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteAuditReport(&buf, out)
+	require.NoError(t, err)
+
+	body := buf.String()
+
+	// Both headings must appear exactly once.
+	require.Equal(t, 1, strings.Count(body, "## Sintatic Violations"), "## Sintatic Violations must appear exactly once")
+	require.Equal(t, 1, strings.Count(body, "## Semantic Analysis"), "## Semantic Analysis must appear exactly once")
+
+	// SemanticPlaceholder must appear verbatim exactly once (RNF-005).
+	require.Equal(t, 1, strings.Count(body, auditvo.SemanticPlaceholder), "SemanticPlaceholder must appear exactly once")
+
+	// Sintatic heading must precede semantic heading (visual order, AC scenario 2).
+	sintaticIdx := strings.Index(body, "## Sintatic Violations")
+	semanticIdx := strings.Index(body, "## Semantic Analysis")
+	require.Less(t, sintaticIdx, semanticIdx, "## Sintatic Violations must appear before ## Semantic Analysis")
+}
+
+// TestWriteAuditReport_US007_AlwaysRendersBothHeadings_WithViolations is a
+// regression test for EP03US-007, scenario: project with at least one violation.
+// Even when violations exist, both top-level headings and the semantic
+// placeholder must still be present in the mandated order.
+func TestWriteAuditReport_US007_AlwaysRendersBothHeadings_WithViolations(t *testing.T) {
+	t.Parallel()
+
+	out := auditvo.AuditProjectOutput{
+		ProfileName:         "hexagonal-java",
+		ManifestPath:        "project-state.yaml",
+		SemanticPlaceholder: auditvo.SemanticPlaceholder,
+		Sintatic: []auditvo.AuditViolation{
+			{
+				RuleID:     "R001",
+				Kind:       model.AuditKindAnnotationPathMismatch,
+				Severity:   model.AuditSeverityError,
+				ModuleID:   "mod-core",
+				FilePath:   "src/main/java/Core.java",
+				Line:       10,
+				Message:    "@Entity found outside domain/",
+				Suggestion: "Move Core.java to the domain/ package.",
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteAuditReport(&buf, out)
+	require.NoError(t, err)
+
+	body := buf.String()
+
+	// Both headings must be present regardless of violation count.
+	require.Contains(t, body, "## Sintatic Violations")
+	require.Contains(t, body, "## Semantic Analysis")
+
+	// Sintatic heading must precede semantic heading.
+	sintaticIdx := strings.Index(body, "## Sintatic Violations")
+	semanticIdx := strings.Index(body, "## Semantic Analysis")
+	require.Less(t, sintaticIdx, semanticIdx, "## Sintatic Violations must appear before ## Semantic Analysis")
+
+	// Semantic placeholder must be present verbatim even when violations exist.
+	require.Contains(t, body, auditvo.SemanticPlaceholder)
+}
+
+// TestWriteAuditReport_US007_HeadingLiteralsMatchAC is a regression guard for
+// EP03US-007 that pins the exact heading strings mandated by the acceptance
+// criteria. An accidental rename (e.g. "Syntactic" instead of "Sintatic") will
+// be caught here by name rather than only via golden-file diff.
+func TestWriteAuditReport_US007_HeadingLiteralsMatchAC(t *testing.T) {
+	t.Parallel()
+
+	out := auditvo.AuditProjectOutput{
+		SemanticPlaceholder: auditvo.SemanticPlaceholder,
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteAuditReport(&buf, out)
+	require.NoError(t, err)
+
+	body := buf.String()
+
+	// Exact AC-mandated spelling: "Sintatic" (not "Syntactic").
+	require.Contains(t, body, "## Sintatic Violations", `heading must match AC literal "## Sintatic Violations"`)
+	// Exact AC-mandated heading for semantic section.
+	require.Contains(t, body, "## Semantic Analysis", `heading must match AC literal "## Semantic Analysis"`)
+}
