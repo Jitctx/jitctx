@@ -27,8 +27,8 @@ func TestSortProjectState_Deterministic(t *testing.T) {
 				Tags:         []string{"B", "A", "A"},
 				Dependencies: []string{"z-module", "b-module", "a-module"},
 				Contracts: []model.Contract{
-					{Name: "B", Type: model.ContractInputPort, Path: "b.java"},
-					{Name: "A", Type: model.ContractInputPort, Path: "a.java"},
+					{Name: "B", Types: []string{string(model.ContractInputPort)}, Path: "b.java"},
+					{Name: "A", Types: []string{string(model.ContractInputPort)}, Path: "a.java"},
 				},
 			},
 			{

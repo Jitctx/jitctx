@@ -32,7 +32,7 @@ func manifestContract(name string, contractType model.ContractType, signatures .
 	}
 	return model.Contract{
 		Name:    name,
-		Type:    contractType,
+		Types:   []string{string(contractType)},
 		Methods: methods,
 	}
 }
@@ -175,7 +175,7 @@ func TestContractDiffer_Diff_ManifestOnlyProducesEXTRA(t *testing.T) {
 	a := actions[0]
 	require.Equal(t, diffvo.DiffActionExtra, a.Type)
 	require.Equal(t, "DeprecatedHelper", a.ContractName)
-	require.Equal(t, string(model.ContractService), a.ContractType)
+	require.Equal(t, []string{string(model.ContractService)}, a.ContractTypes)
 	require.Equal(t, diffvo.DiffSeverityInfo, a.Severity)
 	require.Equal(t, -1, a.Layer)
 }

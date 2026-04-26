@@ -13,6 +13,7 @@ import (
 
 	appscanuc "github.com/jitctx/jitctx/internal/application/usecase/scanuc"
 	"github.com/jitctx/jitctx/internal/cli/command"
+	domspecsvc "github.com/jitctx/jitctx/internal/domain/service"
 	"github.com/jitctx/jitctx/internal/domain/usecase/scanuc"
 	"github.com/jitctx/jitctx/internal/infrastructure/fscontext"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsmanifest"
@@ -26,6 +27,7 @@ func buildScanFactoryWithLogger(profilesDir string, logger *slog.Logger) command
 	return func(manifestPath string) scanuc.UseCase {
 		return appscanuc.New(
 			fsprofile.NewDetectorWithLogger(profilesDir, logger),
+			domspecsvc.NewDeclarativeClassifier(),
 			treesitter.NewWalker(),
 			treesitter.New(),
 			fscontext.New(),
@@ -313,7 +315,9 @@ func TestScanCmd_Integration_ServiceByImplementsUseCase(t *testing.T) {
 
 	// CreateUserServiceImpl implements CreateUserUseCase under /service/ — must be classified as service.
 	require.Contains(t, string(manifest), "CreateUserServiceImpl")
-	require.Contains(t, string(manifest), "type: service")
+	require.Contains(t, string(manifest), "schema_version: 2")
+	require.Contains(t, string(manifest), "types:")
+	require.Contains(t, string(manifest), "- service")
 }
 
 // TestScanCmd_Integration_MultipleCustomProfilesFirstWins verifies that when
@@ -471,7 +475,9 @@ func TestScanCmd_Integration_MultiAnnotationClass(t *testing.T) {
 	// The bundled profile rule "has_annotation: Entity" -> "classify_as: entity" fires on
 	// the simple annotation name, which must still be extracted when @Table(...) is also present.
 	require.Contains(t, manifestStr, "UserWithTableAnnotation")
-	require.Contains(t, manifestStr, "type: entity")
+	require.Contains(t, manifestStr, "schema_version: 2")
+	require.Contains(t, manifestStr, "types:")
+	require.Contains(t, manifestStr, "- entity")
 }
 
 func TestScanCmd_Integration_ManifestTraversalRejected(t *testing.T) {

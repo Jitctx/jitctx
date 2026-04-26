@@ -16,7 +16,8 @@ type contractsSliceJSON struct {
 
 type contractFragmentJSON struct {
 	Name        string   `json:"name"`
-	Type        string   `json:"type"`
+	Type        string   `json:"type,omitempty"`
+	Types       []string `json:"types,omitempty"` // EP04US-003: manifest-sourced multi-types
 	Path        string   `json:"path"`
 	Role        string   `json:"role"`
 	Methods     []string `json:"methods,omitempty"`
@@ -58,7 +59,7 @@ type contractFragmentJSON struct {
 // so JSON-style tooling can grep deterministically.
 func WriteContractsText(w io.Writer, out contractsvo.ExtractContractsOutput) error {
 	t := out.Target
-	if _, err := fmt.Fprintf(w, "# Target: %s (%s)\n", t.Name, t.Type); err != nil {
+	if _, err := fmt.Fprintf(w, "# Target: %s (%s)\n", t.Name, fragmentTypeLabel(t)); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "Source: %s\n", out.Source); err != nil {
@@ -77,7 +78,7 @@ func WriteContractsText(w io.Writer, out contractsvo.ExtractContractsOutput) err
 		return err
 	}
 	for _, dep := range out.Related {
-		if _, err := fmt.Fprintf(w, "\n### %s (%s)\n", dep.Name, dep.Type); err != nil {
+		if _, err := fmt.Fprintf(w, "\n### %s (%s)\n", dep.Name, fragmentTypeLabel(dep)); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintf(w, "Path: %s\n", dep.Path); err != nil {
@@ -163,6 +164,7 @@ func toFragmentJSON(f contractsvo.ContractFragment) contractFragmentJSON {
 	return contractFragmentJSON{
 		Name:        f.Name,
 		Type:        f.Type,
+		Types:       f.Types,
 		Path:        f.Path,
 		Role:        f.Role,
 		Methods:     f.Methods,
@@ -173,4 +175,15 @@ func toFragmentJSON(f contractsvo.ContractFragment) contractFragmentJSON {
 		Endpoints:   f.Endpoints,
 		Annotations: f.Annotations,
 	}
+}
+
+// fragmentTypeLabel returns the human-readable type label for a ContractFragment.
+// It returns f.Type directly when non-empty (spec-sourced projection, singular
+// per RF-015), and falls back to formatTypeLabel(f.Types) for manifest-sourced
+// projections (EP04US-003 dual-shape).
+func fragmentTypeLabel(f contractsvo.ContractFragment) string {
+	if f.Type != "" {
+		return f.Type
+	}
+	return formatTypeLabel(f.Types)
 }

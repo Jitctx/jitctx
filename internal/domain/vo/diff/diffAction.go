@@ -22,13 +22,16 @@ const (
 	DiffSeverityInfo    DiffSeverity = "INFO"
 )
 
-// DiffAction is one reportable item produced by the diff use case.
+// DiffAction is the per-contract diff output. EP04US-003 splits
+// ContractType into ContractType (singular, sourced from SpecContract
+// for CREATE/MODIFY actions) and ContractTypes ([]string, sourced
+// from manifest Contract for EXTRA actions). The differ writes one or
+// the other; presentation layers render whichever is non-zero.
 //
 //   - Type: CREATE | MODIFY | EXTRA.
 //   - ContractName: PascalCase identity of the contract.
-//   - ContractType: spec/manifest type as a string (e.g. "input-port",
-//     "service"). For EXTRA, sourced from the manifest contract; for
-//     CREATE/MODIFY, sourced from the spec.
+//   - ContractType: SpecContract.Type for CREATE/MODIFY (singular per RF-015).
+//   - ContractTypes: manifest Contract.Types for EXTRA (plural, EP04US-003 NEW).
 //   - Severity: ERROR for CREATE, WARNING for MODIFY, INFO for EXTRA.
 //   - Layer: 0-based execution layer for CREATE/MODIFY; -1 for EXTRA
 //     (EXTRA is layer-less and rendered in its own section).
@@ -37,7 +40,8 @@ const (
 type DiffAction struct {
 	Type           DiffActionType
 	ContractName   string
-	ContractType   string
+	ContractType   string   // SpecContract.Type for CREATE/MODIFY
+	ContractTypes  []string // manifest Contract.Types for EXTRA  (EP04US-003 NEW)
 	Severity       DiffSeverity
 	Layer          int
 	AddedMethods   []string

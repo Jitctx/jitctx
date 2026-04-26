@@ -84,11 +84,13 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	tsWalker := treesitter.NewWalker()
 	ctxDiscoverer := fscontext.New()
 	estimator := token.NewHeuristicEstimator()
+	declarativeClassifier := domspecsvc.NewDeclarativeClassifier()
 
 	scanFactory := func(manifestPath string) scanuc.UseCase {
 		store := fsmanifest.New(manifestPath)
 		return appscanuc.New(
 			profileDetector,
+			declarativeClassifier,
 			tsWalker,
 			tsParser,
 			ctxDiscoverer,
@@ -192,6 +194,6 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 		Logger:                logger,
 		ProfileBundleLoader:   profileBundleLoader,
 		BundledProfiles:       bundled,
-		DeclarativeClassifier: domspecsvc.NewDeclarativeClassifier(),
+		DeclarativeClassifier: declarativeClassifier,
 	}
 }

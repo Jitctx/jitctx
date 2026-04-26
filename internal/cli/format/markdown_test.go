@@ -23,7 +23,7 @@ func TestWriteQueryResult_MarkdownIncludesContracts(t *testing.T) {
 			Contracts: []queryvo.ContractSummary{
 				{
 					Name:    "CreateUserUseCase",
-					Type:    "input-port",
+					Types:   []string{"input-port"},
 					Methods: []string{"UserResponse execute(CreateUserCommand cmd)"},
 				},
 			},
@@ -84,7 +84,7 @@ func TestWriteQueryResult_MarkdownEmptyResult_WithContracts(t *testing.T) {
 			Contracts: []queryvo.ContractSummary{
 				{
 					Name:    "PaymentPort",
-					Type:    "input-port",
+					Types:   []string{"input-port"},
 					Methods: []string{"void process(PaymentCommand cmd)"},
 				},
 			},

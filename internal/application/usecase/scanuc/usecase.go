@@ -23,19 +23,21 @@ import (
 
 // Impl implements the scanuc.UseCase interface.
 type Impl struct {
-	profiles  profile.DetectProfilePort
-	walker    parser.WalkJavaFilesPort
-	javaParse parser.ParseJavaFilePort
-	ctxDisc   ctxport.DiscoverContextsPort
-	ctxRead   ctxport.ReadContextBodyPort
-	estimator token.EstimateTokensPort
-	manifest  manifest.SaveManifestPort
-	logger    *slog.Logger
+	profiles              profile.DetectProfilePort
+	declarativeClassifier profile.ClassifyDeclarativePort
+	walker                parser.WalkJavaFilesPort
+	javaParse             parser.ParseJavaFilePort
+	ctxDisc               ctxport.DiscoverContextsPort
+	ctxRead               ctxport.ReadContextBodyPort
+	estimator             token.EstimateTokensPort
+	manifest              manifest.SaveManifestPort
+	logger                *slog.Logger
 }
 
 // New creates a new scanuc.Impl with all required ports.
 func New(
 	profiles profile.DetectProfilePort,
+	declarativeClassifier profile.ClassifyDeclarativePort,
 	walker parser.WalkJavaFilesPort,
 	javaParse parser.ParseJavaFilePort,
 	ctxDisc ctxport.DiscoverContextsPort,
@@ -45,14 +47,15 @@ func New(
 	logger *slog.Logger,
 ) *Impl {
 	return &Impl{
-		profiles:  profiles,
-		walker:    walker,
-		javaParse: javaParse,
-		ctxDisc:   ctxDisc,
-		ctxRead:   ctxRead,
-		estimator: estimator,
-		manifest:  mani,
-		logger:    logger,
+		profiles:              profiles,
+		declarativeClassifier: declarativeClassifier,
+		walker:                walker,
+		javaParse:             javaParse,
+		ctxDisc:               ctxDisc,
+		ctxRead:               ctxRead,
+		estimator:             estimator,
+		manifest:              mani,
+		logger:                logger,
 	}
 }
 
@@ -120,7 +123,13 @@ func (u *Impl) Execute(ctx context.Context, input scanvo.ScanProjectInput) (scan
 	}
 
 	// Step 7 & 8: Classify declarations and group into modules.
-	modules := service.BuildModules(summaries, prof)
+	if err := ctx.Err(); err != nil {
+		return scanvo.ScanProjectOutput{}, err
+	}
+	modules, err := service.BuildModules(ctx, u.declarativeClassifier, summaries, prof, nil)
+	if err != nil {
+		return scanvo.ScanProjectOutput{}, fmt.Errorf("build modules: %w", err)
+	}
 
 	// Step 9: Detect inter-module dependencies.
 	for i := range modules {

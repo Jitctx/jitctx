@@ -312,7 +312,8 @@ public class Foo { public void foo() {} }
 	writeFileAndCommit(t, repo, "src/main/java/com/app/Foo.java", javaContent, oldDate)
 
 	// Write project-state.yaml and profile in the first commit as well.
-	manifest := `generated_at: 2026-04-25T00:00:00Z
+	manifest := `schema_version: 2
+generated_at: 2026-04-25T00:00:00Z
 stack:
   languages:
     - java
@@ -406,7 +407,8 @@ public class Foo { public void foo() {} }
 `
 	writeFileAndCommit(t, repo, "src/main/java/com/app/Foo.java", javaContent, singleDate)
 
-	manifest := `generated_at: 2026-04-25T00:00:00Z
+	manifest := `schema_version: 2
+generated_at: 2026-04-25T00:00:00Z
 stack:
   languages:
     - java

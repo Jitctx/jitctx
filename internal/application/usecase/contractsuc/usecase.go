@@ -275,7 +275,7 @@ func (u *Impl) collectRelated(target model.SpecContract, parsed model.FeatureSpe
 }
 
 // projectManifestContract projects a model.Contract (EP-01 manifest) into a ContractFragment.
-// Only Name, Type, Path, and Methods are populated — the manifest does not track
+// Only Name, Types, Path, and Methods are populated — the manifest does not track
 // relational fields (Uses, DependsOn, etc.).
 func (u *Impl) projectManifestContract(c model.Contract) contractsvo.ContractFragment {
 	methods := make([]string, len(c.Methods))
@@ -284,7 +284,7 @@ func (u *Impl) projectManifestContract(c model.Contract) contractsvo.ContractFra
 	}
 	return contractsvo.ContractFragment{
 		Name:    c.Name,
-		Type:    string(c.Type),
+		Types:   append([]string(nil), c.Types...),
 		Path:    c.Path,
 		Methods: methods,
 		Role:    "Manifest-tracked contract",

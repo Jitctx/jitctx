@@ -28,9 +28,11 @@ type ModuleSummary struct {
 	Contracts []ContractSummary
 }
 
+// ContractSummary is the projection of a manifest contract for query
+// rendering. EP04US-003 replaces the singular Type field with Types.
 type ContractSummary struct {
 	Name    string
-	Type    string   // string form of model.ContractType
+	Types   []string // EP04US-003 (was: Type string)
 	Methods []string // method signatures in order
 }
 

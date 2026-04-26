@@ -38,7 +38,8 @@ func toDomain(d projectStateDTO) *model.ProjectState {
 
 func toDTO(s *model.ProjectState) projectStateDTO {
 	dto := projectStateDTO{
-		GeneratedAt: s.GeneratedAt,
+		SchemaVersion: CurrentManifestSchemaVersion,
+		GeneratedAt:   s.GeneratedAt,
 		Stack: stackDTO{
 			Languages:  s.Stack.Languages,
 			Frameworks: s.Stack.Frameworks,
@@ -89,9 +90,13 @@ func mapContractsToDomain(in []contractDTO) []model.Contract {
 		for _, m := range c.Methods {
 			methods = append(methods, model.Method{Signature: m.Signature})
 		}
+		types := c.Types
+		if types == nil {
+			types = []string{}
+		}
 		out = append(out, model.Contract{
 			Name:    c.Name,
-			Type:    model.ContractType(c.Type),
+			Types:   types,
 			Path:    c.Path,
 			Methods: methods,
 		})
@@ -109,9 +114,15 @@ func mapContractsToDTO(in []model.Contract) []contractDTO {
 		for _, m := range c.Methods {
 			methods = append(methods, methodDTO{Signature: m.Signature})
 		}
+		// Normalise nil Types to empty slice so the YAML output is
+		// "types: []" for unclassified contracts (never "types: null").
+		types := c.Types
+		if types == nil {
+			types = []string{}
+		}
 		out = append(out, contractDTO{
 			Name:    c.Name,
-			Type:    string(c.Type),
+			Types:   types,
 			Path:    c.Path,
 			Methods: methods,
 		})

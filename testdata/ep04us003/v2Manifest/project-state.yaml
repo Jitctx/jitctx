@@ -1,0 +1,20 @@
+schema_version: 2
+generated_at: 2026-04-01T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot
+modules:
+  - id: payments
+    path: src/main/java/com/app/payments
+    tags: []
+    contracts:
+      - name: PaymentService
+        types:
+          - service
+        path: src/main/java/com/app/payments/service/PaymentService.java
+        methods:
+          - signature: void process(Payment payment)
+    dependencies: []
+contexts: []

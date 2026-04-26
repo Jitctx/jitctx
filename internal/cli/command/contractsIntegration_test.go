@@ -170,9 +170,9 @@ func TestContracts_Integration_ManifestFallback(t *testing.T) {
 				Path: "src/main/java/com/app/user",
 				Contracts: []model.Contract{
 					{
-						Name: "UserServiceImpl",
-						Type: model.ContractService,
-						Path: "application/UserServiceImpl.java",
+						Name:  "UserServiceImpl",
+						Types: []string{string(model.ContractService)},
+						Path:  "application/UserServiceImpl.java",
 						Methods: []model.Method{
 							{Signature: "UserResponse execute(CreateUserCommand cmd)"},
 						},

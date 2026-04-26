@@ -23,10 +23,11 @@ import (
 // project-state.yaml used only by query integration tests. It mirrors
 // fsmanifest DTOs so yaml.Marshal produces valid input for fsmanifest.Store.
 type syntheticManifest struct {
-	GeneratedAt time.Time          `yaml:"generated_at"`
-	Stack       syntheticStack     `yaml:"stack"`
-	Modules     []syntheticModule  `yaml:"modules"`
-	Contexts    []syntheticContext `yaml:"contexts"`
+	SchemaVersion int                `yaml:"schema_version"`
+	GeneratedAt   time.Time          `yaml:"generated_at"`
+	Stack         syntheticStack     `yaml:"stack"`
+	Modules       []syntheticModule  `yaml:"modules"`
+	Contexts      []syntheticContext `yaml:"contexts"`
 }
 
 type syntheticStack struct {
@@ -44,7 +45,7 @@ type syntheticModule struct {
 
 type syntheticContract struct {
 	Name    string            `yaml:"name"`
-	Type    string            `yaml:"type"`
+	Types   []string          `yaml:"types"`
 	Path    string            `yaml:"path"`
 	Methods []syntheticMethod `yaml:"methods"`
 }
@@ -63,9 +64,15 @@ type syntheticContext struct {
 	TokenEstimate int      `yaml:"token_estimate"`
 }
 
-// writeTestManifest serialises m into <dir>/project-state.yaml.
+// writeTestManifest serialises m into <dir>/project-state.yaml. The
+// SchemaVersion field is auto-stamped to the current v2 if the caller
+// left it at the zero value, so existing call sites do not need to
+// thread the version explicitly.
 func writeTestManifest(t *testing.T, dir string, m syntheticManifest) {
 	t.Helper()
+	if m.SchemaVersion == 0 {
+		m.SchemaVersion = 2
+	}
 	data, err := yaml.Marshal(m)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "project-state.yaml"), data, 0o644))
@@ -120,9 +127,9 @@ func TestQueryCmd_Integration_ModuleHappyPath(t *testing.T) {
 				Tags: []string{},
 				Contracts: []syntheticContract{
 					{
-						Name: "CreateUserUseCase",
-						Type: "input-port",
-						Path: "src/main/java/com/app/user_management/port/in/CreateUserUseCase.java",
+						Name:  "CreateUserUseCase",
+						Types: []string{"input-port"},
+						Path:  "src/main/java/com/app/user_management/port/in/CreateUserUseCase.java",
 						Methods: []syntheticMethod{
 							{Signature: "User execute(String name, String email)"},
 						},

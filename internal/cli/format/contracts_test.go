@@ -108,6 +108,54 @@ func TestWriteContractsText_NoMethodsNoDeps(t *testing.T) {
 	require.NotContains(t, got, "Endpoints:")
 }
 
+// TestWriteContractsText_RendersMultiTagLabel asserts that a manifest-sourced
+// ContractFragment with multiple Types renders as "(a+b)" in the header (EP04US-003).
+func TestWriteContractsText_RendersMultiTagLabel(t *testing.T) {
+	t.Parallel()
+
+	out := contractsvo.ExtractContractsOutput{
+		Source: "manifest",
+		Target: contractsvo.ContractFragment{
+			Name:  "PaymentAdapter",
+			Types: []string{"output-adapter", "cacheable-component"},
+			Path:  "infrastructure/PaymentAdapter.java",
+			Role:  "Output adapter implementing PaymentPort",
+		},
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteContractsText(&buf, out)
+	require.NoError(t, err)
+
+	got := buf.String()
+	// Multi-type label joins with "+".
+	require.Contains(t, got, "# Target: PaymentAdapter (output-adapter+cacheable-component)")
+}
+
+// TestWriteContractsText_EmptyTypesRendersEmptyParens asserts that a
+// manifest-sourced ContractFragment with Types=[] renders as "()" in the header.
+func TestWriteContractsText_EmptyTypesRendersEmptyParens(t *testing.T) {
+	t.Parallel()
+
+	out := contractsvo.ExtractContractsOutput{
+		Source: "manifest",
+		Target: contractsvo.ContractFragment{
+			Name:  "UnclassifiedBean",
+			Types: []string{},
+			Path:  "infrastructure/UnclassifiedBean.java",
+			Role:  "Unknown role",
+		},
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteContractsText(&buf, out)
+	require.NoError(t, err)
+
+	got := buf.String()
+	// Empty types: formatTypeLabel([]) returns "" → renders as "()".
+	require.Contains(t, got, "# Target: UnclassifiedBean ()")
+}
+
 func TestWriteContractsJSON_RoundTrip(t *testing.T) {
 	t.Parallel()
 

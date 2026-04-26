@@ -229,9 +229,9 @@ func TestContractsUseCase_ManifestFallback_WhenNotInSpec(t *testing.T) {
 				Path: "src/main/java/com/app",
 				Contracts: []model.Contract{
 					{
-						Name: "Whatever",
-						Type: model.ContractService,
-						Path: "application/Whatever.java",
+						Name:  "Whatever",
+						Types: []string{"service"},
+						Path:  "application/Whatever.java",
 						Methods: []model.Method{
 							{Signature: "void doIt()"},
 						},
@@ -273,9 +273,9 @@ func TestContractsUseCase_ManifestFallback_WhenManifestOnlyMode(t *testing.T) {
 				Path: "src/main/java",
 				Contracts: []model.Contract{
 					{
-						Name: "Whatever",
-						Type: model.ContractService,
-						Path: "application/Whatever.java",
+						Name:  "Whatever",
+						Types: []string{"service"},
+						Path:  "application/Whatever.java",
 					},
 				},
 			},

@@ -245,6 +245,17 @@ var (
 	ErrClassificationInvalid = errors.New("classification rule invalid")
 )
 
+// EP04US-003 sentinels — appended at the bottom of the existing var blocks.
+var (
+	// ErrManifestSchemaOutdated is returned when fsmanifest.Store.Load
+	// encounters a project-state.yaml whose schema_version is missing
+	// or less than 2 (EP-04 cutover). Its Error() string is the literal
+	// "manifest schema is v1; run jitctx scan to upgrade the manifest"
+	// — the substring "run jitctx scan to upgrade the manifest" is
+	// required by the EP04US-003 .feature file (Scenario 4).
+	ErrManifestSchemaOutdated = errors.New("manifest schema is v1; run jitctx scan to upgrade the manifest")
+)
+
 // EP04US-001 sentinels — appended at the bottom of the existing var blocks.
 var (
 	// ErrProfileYamlMissing is returned when a profile bundle directory

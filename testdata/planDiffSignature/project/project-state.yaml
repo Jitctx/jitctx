@@ -1,3 +1,4 @@
+schema_version: 2
 generated_at: 2026-04-25T00:00:00Z
 stack:
   languages:
@@ -10,7 +11,8 @@ modules:
     tags: []
     contracts:
       - name: UserRepository
-        type: output-port
+        types:
+          - output-port
         path: src/main/java/com/app/user/port/out/UserRepository.java
         methods:
           - signature: User persist(User user)

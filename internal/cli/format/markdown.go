@@ -64,7 +64,7 @@ func writeQueryMarkdown(w io.Writer, out queryvo.QueryContextOutput) error {
 			return err
 		}
 		for _, c := range out.Module.Contracts {
-			if _, err := fmt.Fprintf(w, "- **%s** (%s)\n", c.Name, c.Type); err != nil {
+			if _, err := fmt.Fprintf(w, "- **%s** (%s)\n", c.Name, formatTypeLabel(c.Types)); err != nil {
 				return err
 			}
 			for _, sig := range c.Methods {

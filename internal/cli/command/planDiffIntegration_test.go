@@ -322,7 +322,8 @@ func TestPlanDiff_Integration_SpecMissing(t *testing.T) {
 
 	workDir := t.TempDir()
 	// Write only a manifest — no spec files.
-	require.NoError(t, os.WriteFile(filepath.Join(workDir, "project-state.yaml"), []byte(`generated_at: 2026-04-25T00:00:00Z
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "project-state.yaml"), []byte(`schema_version: 2
+generated_at: 2026-04-25T00:00:00Z
 stack:
   languages:
     - java

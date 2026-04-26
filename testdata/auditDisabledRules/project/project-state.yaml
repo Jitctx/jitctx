@@ -1,3 +1,4 @@
+schema_version: 2
 generated_at: 2026-04-25T00:00:00Z
 stack:
   languages:
@@ -10,11 +11,13 @@ modules:
     tags: []
     contracts:
       - name: User
-        type: entity
+        types:
+          - entity
         path: src/main/java/com/app/user/domain/User.java
         methods: []
       - name: UserRestController
-        type: rest-adapter
+        types:
+          - rest-adapter
         path: src/main/java/com/app/user/adapter/in/web/UserRestController.java
         methods: []
     dependencies: []

@@ -1,3 +1,4 @@
+schema_version: 2
 generated_at: 2026-04-25T00:00:00Z
 stack:
   languages:
@@ -10,27 +11,32 @@ modules:
     tags: []
     contracts:
       - name: User
-        type: entity
+        types:
+          - entity
         path: src/main/java/com/app/user/domain/User.java
         methods: []
       - name: CreateUserUseCase
-        type: input-port
+        types:
+          - input-port
         path: src/main/java/com/app/user/port/in/CreateUserUseCase.java
         methods:
           - signature: User execute(String name, String email)
       - name: UserRepository
-        type: output-port
+        types:
+          - output-port
         path: src/main/java/com/app/user/port/out/UserRepository.java
         methods:
           - signature: Optional<User> findById(Long id)
           - signature: User save(User user)
       - name: CreateUserService
-        type: service
+        types:
+          - service
         path: src/main/java/com/app/user/service/CreateUserService.java
         methods:
           - signature: User execute(String name, String email)
       - name: UserController
-        type: rest-adapter
+        types:
+          - rest-adapter
         path: src/main/java/com/app/user/adapter/in/web/UserController.java
         methods: []
     dependencies: []

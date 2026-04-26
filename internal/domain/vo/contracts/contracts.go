@@ -32,13 +32,15 @@ type ExtractContractsOutput struct {
 	Related []ContractFragment // dependencies, alphabetical by Name, distinct
 }
 
-// ContractFragment is the projection of one contract for slice rendering.
-// Field semantics mirror model.SpecContract; for manifest-sourced fragments
-// (Source == "manifest"), only Name/Type/Path/Methods are populated and the
-// remaining string/slice fields are zero-valued.
+// ContractFragment is the projection of one contract for slice
+// rendering. EP04US-003 keeps Type (string) for the spec-sourced
+// projection (which stays singular per RF-015) and adds Types
+// ([]string) for the manifest-sourced projection. Exactly one of
+// {Type, Types} is non-zero per fragment depending on Source.
 type ContractFragment struct {
 	Name        string
-	Type        string   // string form of model.ContractType (e.g., "service")
+	Type        string   // populated when Source == "spec"; empty when Source == "manifest"
+	Types       []string // populated when Source == "manifest"; nil when Source == "spec"  (EP04US-003 NEW)
 	Path        string   // relative target path computed via ContractPathMapper
 	Methods     []string // raw signatures as declared
 	Fields      []string

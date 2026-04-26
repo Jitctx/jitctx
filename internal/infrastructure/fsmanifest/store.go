@@ -33,13 +33,43 @@ func (s *Store) Load(ctx context.Context) (*model.ProjectState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
+
+	// Phase 1 (strict): decode with KnownFields(true).
 	var dto projectStateDTO
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
-	if err := dec.Decode(&dto); err != nil {
-		return nil, fmt.Errorf("unmarshal manifest: %w", err)
+	strictErr := dec.Decode(&dto)
+
+	if strictErr == nil && dto.SchemaVersion == CurrentManifestSchemaVersion {
+		// Happy path: v2 manifest decoded cleanly.
+		return toDomain(dto), nil
 	}
-	return toDomain(dto), nil
+
+	// Phase 2 (lenient probe): extract the schema_version from the raw YAML
+	// without unknown-field rejection, so we can distinguish v1 from a
+	// genuinely forward-incompatible version.
+	var probe struct {
+		SchemaVersion int `yaml:"schema_version"`
+	}
+	lenDec := yaml.NewDecoder(bytes.NewReader(b))
+	// KnownFields(false) is the default; lenient decode ignores unknown fields.
+	_ = lenDec.Decode(&probe)
+
+	// schema_version absent (== 0), explicitly 1, or strict decode failed with
+	// a v1-shaped document → v1 manifest: ask the user to re-scan.
+	if probe.SchemaVersion < CurrentManifestSchemaVersion {
+		return nil, fmt.Errorf("load manifest %q: %w", s.path, domerr.ErrManifestSchemaOutdated)
+	}
+
+	// schema_version > CurrentManifestSchemaVersion → forward incompatibility.
+	if strictErr != nil {
+		return nil, fmt.Errorf("load manifest %q: schema version %d is not supported by this binary (max %d): %w",
+			s.path, probe.SchemaVersion, CurrentManifestSchemaVersion, strictErr)
+	}
+
+	// schema_version == CurrentManifestSchemaVersion but strict decode failed
+	// (unknown field from a patch-level extension). Surface the decode error.
+	return nil, fmt.Errorf("load manifest %q: %w", s.path, strictErr)
 }
 
 func (s *Store) Save(ctx context.Context, state *model.ProjectState) error {

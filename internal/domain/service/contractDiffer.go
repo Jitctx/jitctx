@@ -100,11 +100,11 @@ func (d ContractDiffer) Diff(
 	for _, mc := range manifest {
 		if !specIndex[mc.Name] {
 			actions = append(actions, diffvo.DiffAction{
-				Type:         diffvo.DiffActionExtra,
-				ContractName: mc.Name,
-				ContractType: string(mc.Type),
-				Severity:     diffvo.DiffSeverityInfo,
-				Layer:        -1,
+				Type:          diffvo.DiffActionExtra,
+				ContractName:  mc.Name,
+				ContractTypes: append([]string(nil), mc.Types...),
+				Severity:      diffvo.DiffSeverityInfo,
+				Layer:         -1,
 			})
 		}
 	}

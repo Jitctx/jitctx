@@ -71,8 +71,8 @@ func stateWithTwoContextsAndContracts() *model.ProjectState {
 				Tags: []string{"user"},
 				Contracts: []model.Contract{
 					{
-						Name: "CreateUserUseCase",
-						Type: model.ContractInputPort,
+						Name:  "CreateUserUseCase",
+						Types: []string{string(model.ContractInputPort)},
 						Methods: []model.Method{
 							{Signature: "UserResponse execute(CreateUserCommand cmd)"},
 						},
@@ -131,7 +131,7 @@ func TestQueryUseCase_HappyPath(t *testing.T) {
 	require.Equal(t, "user-management", out.Module.ID)
 	require.Len(t, out.Module.Contracts, 1)
 	require.Equal(t, "CreateUserUseCase", out.Module.Contracts[0].Name)
-	require.Equal(t, "input-port", out.Module.Contracts[0].Type)
+	require.Equal(t, []string{"input-port"}, out.Module.Contracts[0].Types)
 	require.Equal(t, []string{"UserResponse execute(CreateUserCommand cmd)"}, out.Module.Contracts[0].Methods)
 }
 

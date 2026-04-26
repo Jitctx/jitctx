@@ -2,11 +2,18 @@ package fsmanifest
 
 import "time"
 
+// CurrentManifestSchemaVersion is the schema version written by this binary.
+// Manifests with a schema_version < 2 (including v1 manifests without the
+// field, which decode as 0) are rejected by Store.Load with
+// domerr.ErrManifestSchemaOutdated.
+const CurrentManifestSchemaVersion = 2
+
 type projectStateDTO struct {
-	GeneratedAt time.Time    `yaml:"generated_at"`
-	Stack       stackDTO     `yaml:"stack"`
-	Modules     []moduleDTO  `yaml:"modules"`
-	Contexts    []contextDTO `yaml:"contexts"`
+	SchemaVersion int          `yaml:"schema_version"`
+	GeneratedAt   time.Time    `yaml:"generated_at"`
+	Stack         stackDTO     `yaml:"stack"`
+	Modules       []moduleDTO  `yaml:"modules"`
+	Contexts      []contextDTO `yaml:"contexts"`
 }
 
 type stackDTO struct {
@@ -24,7 +31,7 @@ type moduleDTO struct {
 
 type contractDTO struct {
 	Name    string      `yaml:"name"`
-	Type    string      `yaml:"type"`
+	Types   []string    `yaml:"types"`
 	Path    string      `yaml:"path"`
 	Methods []methodDTO `yaml:"methods"`
 }

@@ -203,11 +203,11 @@ func TestWriteDiffPlanReport_ExtraOnly(t *testing.T) {
 		Feature: "legacy-clean",
 		Actions: []diffvo.DiffAction{
 			{
-				Type:         diffvo.DiffActionExtra,
-				ContractName: "DeprecatedHelper",
-				ContractType: "service",
-				Severity:     diffvo.DiffSeverityInfo,
-				Layer:        -1,
+				Type:          diffvo.DiffActionExtra,
+				ContractName:  "DeprecatedHelper",
+				ContractTypes: []string{"service"},
+				Severity:      diffvo.DiffSeverityInfo,
+				Layer:         -1,
 			},
 		},
 		HasChanges: true,
@@ -260,11 +260,11 @@ func TestWriteDiffPlanReport_MixedAcrossLayers(t *testing.T) {
 			},
 			// EXTRA
 			{
-				Type:         diffvo.DiffActionExtra,
-				ContractName: "OldHelper",
-				ContractType: "service",
-				Severity:     diffvo.DiffSeverityInfo,
-				Layer:        -1,
+				Type:          diffvo.DiffActionExtra,
+				ContractName:  "OldHelper",
+				ContractTypes: []string{"service"},
+				Severity:      diffvo.DiffSeverityInfo,
+				Layer:         -1,
 			},
 		},
 		HasChanges: true,
@@ -324,11 +324,11 @@ func TestWriteDiffPlanReport_Determinism(t *testing.T) {
 				RemovedMethods: []string{"exec"},
 			},
 			{
-				Type:         diffvo.DiffActionExtra,
-				ContractName: "Gamma",
-				ContractType: "output-port",
-				Severity:     diffvo.DiffSeverityInfo,
-				Layer:        -1,
+				Type:          diffvo.DiffActionExtra,
+				ContractName:  "Gamma",
+				ContractTypes: []string{"output-port"},
+				Severity:      diffvo.DiffSeverityInfo,
+				Layer:         -1,
 			},
 		},
 		HasChanges: true,
@@ -385,4 +385,89 @@ func TestWriteDiffPlanReport_FeatureHeaderOmittedWhenEmpty(t *testing.T) {
 	got := buf.String()
 	require.NotContains(t, got, "<!--")
 	require.Contains(t, got, "## Diff Plan")
+}
+
+// TestFormatTypeLabel_EmptySingleAndMulti verifies the type-label rendering
+// convention used throughout diffPlan and contracts formatters (EP04US-003).
+// Tested indirectly via WriteDiffPlanReport EXTRA bullet rendering.
+func TestFormatTypeLabel_EmptySingleAndMulti(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name          string
+		contractTypes []string
+		wantLabel     string
+	}{
+		{
+			name:          "empty",
+			contractTypes: []string{},
+			wantLabel:     "()",
+		},
+		{
+			name:          "single",
+			contractTypes: []string{"service"},
+			wantLabel:     "(service)",
+		},
+		{
+			name:          "multi",
+			contractTypes: []string{"x", "y"},
+			wantLabel:     "(x+y)",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			out := diffvo.DiffPlanOutput{
+				Actions: []diffvo.DiffAction{
+					{
+						Type:          diffvo.DiffActionExtra,
+						ContractName:  "SomeContract",
+						ContractTypes: tc.contractTypes,
+						Severity:      diffvo.DiffSeverityInfo,
+						Layer:         -1,
+					},
+				},
+				HasChanges: true,
+			}
+
+			var buf bytes.Buffer
+			err := format.WriteDiffPlanReport(&buf, out)
+			require.NoError(t, err)
+
+			got := buf.String()
+			require.Contains(t, got, "- 🔵 INFO EXTRA: SomeContract "+tc.wantLabel)
+		})
+	}
+}
+
+// TestWriteDiffPlanReport_ExtraMultiTag asserts that an EXTRA action with
+// multiple ContractTypes renders the joined "+"-delimited label (EP04US-003).
+func TestWriteDiffPlanReport_ExtraMultiTag(t *testing.T) {
+	t.Parallel()
+
+	out := diffvo.DiffPlanOutput{
+		Feature: "multi-tag-extra",
+		Actions: []diffvo.DiffAction{
+			{
+				Type:          diffvo.DiffActionExtra,
+				ContractName:  "CachedPaymentAdapter",
+				ContractTypes: []string{"output-adapter", "cacheable-component"},
+				Severity:      diffvo.DiffSeverityInfo,
+				Layer:         -1,
+			},
+		},
+		HasChanges: true,
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteDiffPlanReport(&buf, out)
+	require.NoError(t, err)
+
+	got := buf.String()
+
+	// Multi-type EXTRA label must join with "+".
+	require.Contains(t, got, "- 🔵 INFO EXTRA: CachedPaymentAdapter (output-adapter+cacheable-component)")
 }

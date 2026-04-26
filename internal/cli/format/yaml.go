@@ -37,7 +37,7 @@ type queryYAMLMetadata struct {
 
 type queryYAMLContractSummary struct {
 	Name    string   `yaml:"name"`
-	Type    string   `yaml:"type"`
+	Types   []string `yaml:"types"` // EP04US-003 (was: Type string)
 	Methods []string `yaml:"methods,omitempty"`
 }
 
@@ -75,7 +75,7 @@ func newQueryYAMLDoc(out queryvo.QueryContextOutput) queryYAMLDoc {
 			}
 			contracts = append(contracts, queryYAMLContractSummary{
 				Name:    cc.Name,
-				Type:    cc.Type,
+				Types:   normaliseStringSlice(cc.Types),
 				Methods: methods,
 			})
 		}

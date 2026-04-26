@@ -222,8 +222,8 @@ func TestDiffUseCase_EmptyDiff(t *testing.T) {
 				ID: "users",
 				Contracts: []model.Contract{
 					{
-						Name: "UserRepository",
-						Type: model.ContractOutputPort,
+						Name:  "UserRepository",
+						Types: []string{string(model.ContractOutputPort)},
 						Methods: []model.Method{
 							{Signature: "User save(User user)"},
 						},
@@ -302,7 +302,7 @@ func TestDiffUseCase_Determinism(t *testing.T) {
 			{
 				ID: "payments",
 				Contracts: []model.Contract{
-					{Name: "LegacyPaymentHelper", Type: model.ContractService},
+					{Name: "LegacyPaymentHelper", Types: []string{string(model.ContractService)}},
 				},
 			},
 		},

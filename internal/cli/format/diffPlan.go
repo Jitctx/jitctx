@@ -143,7 +143,7 @@ func writeDiffActionLine(w io.Writer, a diffvo.DiffAction) error {
 		}
 	case diffvo.DiffActionExtra:
 		if _, err := fmt.Fprintf(w, "- %s %s: %s (%s)\n",
-			badge, string(a.Type), a.ContractName, a.ContractType); err != nil {
+			badge, string(a.Type), a.ContractName, formatTypeLabel(a.ContractTypes)); err != nil {
 			return err
 		}
 	}

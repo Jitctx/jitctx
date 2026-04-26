@@ -13,10 +13,26 @@ import (
 	appscanuc "github.com/jitctx/jitctx/internal/application/usecase/scanuc"
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
 	"github.com/jitctx/jitctx/internal/domain/model"
+	profilevo "github.com/jitctx/jitctx/internal/domain/vo/profile"
 	scanvo "github.com/jitctx/jitctx/internal/domain/vo/scan"
 )
 
 // --- Fakes ---
+
+type fakeClassifyDeclarativePort struct {
+	classify func(ctx context.Context, input profilevo.ClassificationInput, types []model.ProfileTypeDeclaration) ([]string, error)
+}
+
+func (f *fakeClassifyDeclarativePort) ClassifyDeclarative(
+	ctx context.Context,
+	input profilevo.ClassificationInput,
+	types []model.ProfileTypeDeclaration,
+) ([]string, error) {
+	if f.classify != nil {
+		return f.classify(ctx, input, types)
+	}
+	return nil, nil
+}
 
 type fakeDetectPort struct {
 	detect func(ctx context.Context, fsys fs.FS) (*model.FrameworkProfile, error)
@@ -92,6 +108,7 @@ func buildMinimalUseCase(
 ) *appscanuc.Impl {
 	return appscanuc.New(
 		&fakeDetectPort{detect: detectFn},
+		&fakeClassifyDeclarativePort{},
 		&fakeWalkPort{walk: walkFn},
 		&fakeParsePort{parse: parseFn},
 		&fakeDiscoverPort{discover: func(_ context.Context, _ fs.FS) ([]model.Context, error) {

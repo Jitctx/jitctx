@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 
 	"github.com/jitctx/jitctx/internal/domain/model"
+	"github.com/jitctx/jitctx/internal/domain/port/profile"
 )
 
 // reservedHexagonalSegments are path segments that are part of the hexagonal
@@ -26,25 +28,64 @@ var reservedHexagonalSegments = map[string]bool{
 // to skip (e.g., com/app → depth=2).
 const groupDepth = 2
 
-// BuildModules groups JavaFileSummary declarations into modules using the hexagonal strategy.
+// BuildModules groups JavaFileSummary declarations into modules using
+// the hexagonal strategy. EP04US-003 adds two parameters and an error
+// return: the declarative classifier port and the list of profile type
+// declarations. When typesDecl is non-empty, BuildModules uses the
+// declarative path (delegates to ClassifyAndBuildContracts and KEEPS
+// declarations whose Types come back empty). When typesDecl is empty
+// or nil, BuildModules falls back to the legacy ClassifyDeclaration
+// path which DROPS unclassified declarations (EP-03 behaviour). This
+// transitional dual-mode lets the existing EP-03 single-file profile
+// loader keep producing manifests while the EP-04 declarative profile
+// loader (US-001/US-002) is being plumbed end-to-end (US-006).
+//
+// TODO(US-009): remove the legacy fallback once the declarative
+// classifier is wired end-to-end and the legacy ClassifyDeclaration
+// service is deleted.
 func BuildModules(
+	ctx context.Context,
+	classifier profile.ClassifyDeclarativePort,
 	summaries []model.JavaFileSummary,
 	prof *model.FrameworkProfile,
-) []model.Module {
+	typesDecl []model.ProfileTypeDeclaration,
+) ([]model.Module, error) {
 	moduleMap := make(map[string]*model.Module)
+	declarative := len(typesDecl) > 0
 
 	for _, summary := range summaries {
+		if declarative {
+			contracts, err := ClassifyAndBuildContracts(ctx, classifier, summary, typesDecl)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range contracts {
+				moduleRoot, moduleID := deriveModuleRoot(summary.Path)
+				if moduleID == "" {
+					continue
+				}
+				if _, exists := moduleMap[moduleID]; !exists {
+					moduleMap[moduleID] = &model.Module{
+						ID:   moduleID,
+						Path: moduleRoot,
+						Tags: []string{},
+					}
+				}
+				moduleMap[moduleID].Contracts = append(moduleMap[moduleID].Contracts, c)
+			}
+			continue
+		}
+
+		// Legacy fallback path — preserves EP-03 behaviour exactly.
 		for _, decl := range summary.Declarations {
 			contractType, ok := ClassifyDeclaration(decl, summary.Path, prof)
 			if !ok {
 				continue
 			}
-
 			moduleRoot, moduleID := deriveModuleRoot(summary.Path)
 			if moduleID == "" {
 				continue
 			}
-
 			if _, exists := moduleMap[moduleID]; !exists {
 				moduleMap[moduleID] = &model.Module{
 					ID:   moduleID,
@@ -52,15 +93,13 @@ func BuildModules(
 					Tags: []string{},
 				}
 			}
-
 			methods := make([]model.Method, 0, len(decl.Methods))
 			for _, m := range decl.Methods {
 				methods = append(methods, model.Method{Signature: m.Signature})
 			}
-
 			moduleMap[moduleID].Contracts = append(moduleMap[moduleID].Contracts, model.Contract{
 				Name:    decl.Name,
-				Type:    contractType,
+				Types:   []string{string(contractType)}, // wrap legacy single-type into the new slice form
 				Path:    summary.Path,
 				Methods: methods,
 			})
@@ -71,7 +110,7 @@ func BuildModules(
 	for _, m := range moduleMap {
 		modules = append(modules, *m)
 	}
-	return modules
+	return modules, nil
 }
 
 // deriveModuleRoot computes the module root directory path and module ID for a file.

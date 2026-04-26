@@ -1,0 +1,14 @@
+name: multi-tag-bundle
+detect:
+  files: []
+types:
+  - id: output-adapter
+    description: A class that implements the Repository interface (outbound persistence adapter).
+    classification:
+      - implements_all:
+          - Repository
+  - id: cacheable-component
+    description: A class that implements the Cacheable interface (cache-aware component).
+    classification:
+      - implements_all:
+          - Cacheable

@@ -22,7 +22,7 @@ func twoContextOutput() queryvo.QueryContextOutput {
 			Contracts: []queryvo.ContractSummary{
 				{
 					Name:    "CreateUserUseCase",
-					Type:    "input-port",
+					Types:   []string{"input-port"},
 					Methods: []string{"UserResponse execute(CreateUserCommand cmd)"},
 				},
 			},
@@ -103,10 +103,10 @@ func TestWriteQueryResult_YAMLIncludesContracts(t *testing.T) {
 
 	first := contracts[0].(map[string]any)
 	_, hasName := first["name"]
-	_, hasType := first["type"]
+	_, hasTypes := first["types"]
 	_, hasMethods := first["methods"]
 	require.True(t, hasName, "contract missing 'name' key")
-	require.True(t, hasType, "contract missing 'type' key")
+	require.True(t, hasTypes, "contract missing 'types' key")
 	require.True(t, hasMethods, "contract missing 'methods' key")
 
 	methods := first["methods"].([]any)
@@ -253,4 +253,38 @@ func TestWriteQueryResult_YAMLNoMarkdownComment(t *testing.T) {
 	rawYAML := buf.String()
 	require.False(t, strings.HasPrefix(rawYAML, "<!--"),
 		"YAML output must not start with an HTML comment (markdown header leak)")
+}
+
+// TestWriteQueryYAML_EmitsTypesSequence asserts that the YAML output emits
+// `types:` as a YAML sequence, not a scalar `type:` field (EP04US-003).
+func TestWriteQueryYAML_EmitsTypesSequence(t *testing.T) {
+	t.Parallel()
+
+	out := queryvo.QueryContextOutput{
+		Module: queryvo.ModuleSummary{
+			ID: "payments",
+			Contracts: []queryvo.ContractSummary{
+				{
+					Name:    "PaymentGateway",
+					Types:   []string{"service"},
+					Methods: []string{"void charge(Amount a)"},
+				},
+			},
+		},
+		Loaded:      nil,
+		TotalTokens: 0,
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteQueryResult(&buf, "yaml", out)
+	require.NoError(t, err)
+
+	rawYAML := buf.String()
+
+	// Must use `types:` (plural) not `type:` (singular).
+	require.Contains(t, rawYAML, "types:")
+	require.NotContains(t, rawYAML, "\n      type: ")
+
+	// The value must appear as a sequence item.
+	require.Contains(t, rawYAML, "- service")
 }

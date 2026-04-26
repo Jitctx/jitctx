@@ -69,9 +69,9 @@ func buildYAMLTestFixture(t *testing.T) string {
 				Tags: []string{},
 				Contracts: []syntheticContract{
 					{
-						Name: "CreateUserUseCase",
-						Type: "input-port",
-						Path: "src/main/java/com/app/user_management/port/in/CreateUserUseCase.java",
+						Name:  "CreateUserUseCase",
+						Types: []string{"input-port"},
+						Path:  "src/main/java/com/app/user_management/port/in/CreateUserUseCase.java",
 						Methods: []syntheticMethod{
 							{Signature: "User execute(String name, String email)"},
 						},

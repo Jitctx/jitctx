@@ -117,8 +117,8 @@ func (u *Impl) Execute(ctx context.Context, input queryvo.QueryContextInput) (qu
 	summary := queryvo.ModuleSummary{ID: module.ID}
 	for _, c := range module.Contracts {
 		cs := queryvo.ContractSummary{
-			Name: c.Name,
-			Type: string(c.Type),
+			Name:  c.Name,
+			Types: append([]string(nil), c.Types...),
 		}
 		for _, m := range c.Methods {
 			cs.Methods = append(cs.Methods, m.Signature)
