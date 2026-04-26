@@ -14,7 +14,7 @@ func NewRootCmd(d Deps) *cobra.Command {
 		SilenceErrors: false,
 	}
 	root.AddCommand(
-		command.NewScanCmd(d.ScanFactory, d.Logger),
+		command.NewScanCmd(d.ScanFactory, d.Refactor, d.Logger),
 		command.NewQueryCmd(d.Query, d.Logger),
 		command.NewPlanCmd(d.Plan, d.PlanNew, d.Diff, d.WorkDir, d.PlansDir, d.Logger),
 		command.NewContractsCmd(d.Contracts, d.WorkDir, d.PlansDir, d.Logger),

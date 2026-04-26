@@ -9,6 +9,7 @@ import (
 	appplannewuc "github.com/jitctx/jitctx/internal/application/usecase/plannewuc"
 	appplanuc "github.com/jitctx/jitctx/internal/application/usecase/planuc"
 	appqueryuc "github.com/jitctx/jitctx/internal/application/usecase/queryuc"
+	apprefactoruc "github.com/jitctx/jitctx/internal/application/usecase/refactoruc"
 	appscaffolduc "github.com/jitctx/jitctx/internal/application/usecase/scaffolduc"
 	appscanuc "github.com/jitctx/jitctx/internal/application/usecase/scanuc"
 	"github.com/jitctx/jitctx/internal/cli/command"
@@ -19,6 +20,7 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/usecase/plannewuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/planuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/queryuc"
+	"github.com/jitctx/jitctx/internal/domain/usecase/refactoruc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/scaffolduc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/scanuc"
 	"github.com/jitctx/jitctx/internal/infrastructure/fscontext"
@@ -42,6 +44,7 @@ type Deps struct {
 	Contracts   contractsuc.UseCase
 	Scaffold    scaffolduc.UseCase
 	Audit       audituc.UseCase
+	Refactor    refactoruc.UseCase
 	WorkDir     string
 	PlansDir    string
 	Logger      *slog.Logger
@@ -95,6 +98,8 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	layerer := domspecsvc.NewDependencyLayerer()
 	differ := domspecsvc.NewContractDiffer(domspecsvc.NewSignatureNormalizer())
 
+	markerParser := domspecsvc.NewMarkerParser()
+
 	return Deps{
 		ScanFactory: scanFactory,
 		Query:       appqueryuc.New(manifestStore, ctxDiscoverer, estimator, logger),
@@ -136,6 +141,13 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			tsParser,         // parser.ParseJavaFilePort
 			tsParser,         // parser.ListJavaFieldsPort (same *Parser satisfies both)
 			auditEvaluator,
+			logger,
+		),
+		Refactor: apprefactoruc.New(
+			manifestStore, // manifest.LoadManifestPort — same instance as audit/diff
+			tsWalker,      // parser.WalkJavaFilesPort — same instance as audit
+			tsParser,      // parser.ListJavaCommentsPort — same *Parser satisfies multiple ports
+			markerParser,
 			logger,
 		),
 		WorkDir:  cfg.WorkDir,

@@ -1,0 +1,18 @@
+generated_at: 2026-04-25T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: user-management
+    path: src/main/java/com/app/usermanagement
+    tags: []
+    contracts: []
+    dependencies: []
+  - id: billing
+    path: src/main/java/com/app/billing
+    tags: []
+    contracts: []
+    dependencies: []
+contexts: []

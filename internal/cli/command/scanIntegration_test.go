@@ -48,7 +48,7 @@ func TestScanCmd_Integration_HappyPath(t *testing.T) {
 	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
 
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, discardLogger())
+	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -92,7 +92,7 @@ func TestScanCmd_Integration_NoProfile(t *testing.T) {
 	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
 
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, discardLogger())
+	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -115,7 +115,7 @@ func TestScanCmd_Integration_PartialParse(t *testing.T) {
 	factory := buildScanFactoryWithLogger(profilesDir, logger)
 
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, logger)
+	cmd := command.NewScanCmd(factory, nil, logger)
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -138,7 +138,7 @@ func TestScanCmd_Integration_Deterministic(t *testing.T) {
 	runScan := func() string {
 		manifestPath := filepath.Join(workDir, "project-state-det.yaml")
 		factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
-		cmd := command.NewScanCmd(factory, discardLogger())
+		cmd := command.NewScanCmd(factory, nil, discardLogger())
 		cmd.SetOut(os.Stdout)
 		cmd.SetArgs([]string{"--path", workDir, "--manifest", manifestPath})
 		require.NoError(t, cmd.ExecuteContext(context.Background()))
@@ -171,7 +171,7 @@ dependencies {
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
 	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, discardLogger())
+	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -217,7 +217,7 @@ rules:
 
 	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, discardLogger())
+	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir, "--profile", "my-spring"})
 
@@ -244,7 +244,7 @@ func TestScanCmd_Integration_ProfileLog(t *testing.T) {
 
 	factory := buildScanFactoryWithLogger(profilesDir, logger)
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, logger)
+	cmd := command.NewScanCmd(factory, nil, logger)
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -279,7 +279,7 @@ dependencies {
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
 	factory := buildScanFactoryWithLogger(profilesDir, logger)
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, logger)
+	cmd := command.NewScanCmd(factory, nil, logger)
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -300,7 +300,7 @@ func TestScanCmd_Integration_ServiceByImplementsUseCase(t *testing.T) {
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
 	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, discardLogger())
+	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -360,7 +360,7 @@ rules:
 
 	factory := buildScanFactoryWithLogger(profilesDir, logger)
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, logger)
+	cmd := command.NewScanCmd(factory, nil, logger)
 	cmd.SetOut(&stdout)
 	// Run WITHOUT --profile flag — detector auto-picks by alphabetical precedence.
 	cmd.SetArgs([]string{"--path", workDir})
@@ -406,7 +406,7 @@ func TestScanCmd_Integration_MalformedCustomProfileIsSkipped(t *testing.T) {
 
 	factory := buildScanFactoryWithLogger(profilesDir, warnLogger)
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, warnLogger)
+	cmd := command.NewScanCmd(factory, nil, warnLogger)
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -425,7 +425,7 @@ func TestScanCmd_Integration_MalformedCustomProfileIsSkipped(t *testing.T) {
 	var infoLogBuf bytes.Buffer
 	infoLogger := slog.New(slog.NewTextHandler(&infoLogBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	factory2 := buildScanFactoryWithLogger(profilesDir, infoLogger)
-	cmd2 := command.NewScanCmd(factory2, infoLogger)
+	cmd2 := command.NewScanCmd(factory2, nil, infoLogger)
 	cmd2.SetOut(&stdout)
 	manifestPath2 := filepath.Join(workDir, "project-state-2.yaml")
 	cmd2.SetArgs([]string{"--path", workDir, "--manifest", manifestPath2})
@@ -457,7 +457,7 @@ func TestScanCmd_Integration_MultiAnnotationClass(t *testing.T) {
 	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
 
 	var stdout bytes.Buffer
-	cmd := command.NewScanCmd(factory, discardLogger())
+	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
@@ -482,7 +482,7 @@ func TestScanCmd_Integration_ManifestTraversalRejected(t *testing.T) {
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
 	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
 
-	cmd := command.NewScanCmd(factory, discardLogger())
+	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(os.Stdout)
 	cmd.SetArgs([]string{"--path", workDir, "--manifest", "../escape.yaml"})
 

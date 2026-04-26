@@ -44,4 +44,7 @@ const (
 
 	nodeFieldDecl          = "field_declaration"
 	nodeVariableDeclarator = "variable_declarator"
+
+	nodeLineComment  = "line_comment"
+	nodeBlockComment = "block_comment"
 )
