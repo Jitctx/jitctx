@@ -104,13 +104,14 @@ func annotationMatches(target string, annotations []string) bool {
 	return false
 }
 
-// implementsAllOf returns true when every name in want appears in have
-// (subset match — have may carry extras).
+// implementsAllOf returns true when every pattern in want matches at least
+// one name in have (subset match — have may carry extras).
+// Each entry in want is a single-`*` glob; see globMatchDeclarative.
 func implementsAllOf(want, have []string) bool {
 	for _, w := range want {
 		found := false
 		for _, h := range have {
-			if h == w {
+			if globMatchDeclarative(w, h) {
 				found = true
 				break
 			}
@@ -122,16 +123,30 @@ func implementsAllOf(want, have []string) bool {
 	return true
 }
 
-// implementsAnyOf returns true when any name in candidates appears in have.
+// implementsAnyOf returns true when any pattern in candidates matches any
+// name in have. Each entry in candidates is a single-`*` glob; see
+// globMatchDeclarative.
 func implementsAnyOf(candidates, have []string) bool {
 	for _, c := range candidates {
 		for _, h := range have {
-			if h == c {
+			if globMatchDeclarative(c, h) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// globMatchDeclarative supports a single '*' wildcard, matching
+// profileClassifier.globMatch semantics exactly.
+// Pattern "Foo*Bar" is treated as prefix="Foo", suffix="Bar" (first cut only).
+// Literal patterns (no '*') require exact equality.
+func globMatchDeclarative(pattern, s string) bool {
+	prefix, suffix, found := strings.Cut(pattern, "*")
+	if !found {
+		return pattern == s
+	}
+	return strings.HasPrefix(s, prefix) && strings.HasSuffix(s, suffix)
 }
 
 // Compile-time assertion that DeclarativeClassifier satisfies ClassifyDeclarativePort.

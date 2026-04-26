@@ -133,6 +133,9 @@ func buildUseCaseWithConfig(
 		service.NewAuditRuleFilter(),
 		service.NewAuditEvaluator(),
 		noopLogger(),
+		nil, // bundleAuditRules — legacy detector path always succeeds in these tests
+		nil, // resolver — same reason
+		"",  // profilesDir — unused on legacy path
 	)
 }
 

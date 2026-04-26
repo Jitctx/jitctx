@@ -2,6 +2,7 @@ package fsprofile
 
 import (
 	"fmt"
+	"log/slog"
 
 	"gopkg.in/yaml.v3"
 
@@ -12,11 +13,15 @@ import (
 // toBundleDomain assembles a *model.ProfileBundle from a parsed bundleDTO and
 // the eagerly-loaded templates map. It validates that every type entry with a
 // non-empty template field references a template that was actually loaded.
-// This is a pure function with no I/O — directly testable without an fs.FS.
+// logger is used to emit WARN entries for unrecognised audit_rules kinds; when
+// nil, slog.Default() is used.
 //
 // The caller is responsible for setting bundle.Dir and bundle.Profile.Source
 // after this function returns.
-func toBundleDomain(dto bundleDTO, templates map[string][]byte) (*model.ProfileBundle, error) {
+func toBundleDomain(dto bundleDTO, templates map[string][]byte, logger *slog.Logger) (*model.ProfileBundle, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	// Determine effective name: prefer the singular "language" field for EP-04
 	// schema; fall back to the first element of the legacy "languages" list.
 	lang := dto.Language
@@ -119,10 +124,39 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte) (*model.ProfileB
 		rawPackaging = b
 	}
 
+	// Map audit_rules — mirror auditLoader.go semantics: unknown kinds are
+	// dropped with a WARN log; unknown severities are fatal.
+	rawAuditRules := make([]model.AuditRule, 0, len(dto.AuditRules))
+	for _, d := range dto.AuditRules {
+		kind := model.AuditRuleKind(d.Kind)
+		if !knownAuditRuleKinds[kind] {
+			logger.Warn("unknown audit rule kind in bundle profile, dropping rule",
+				slog.String("kind", d.Kind),
+				slog.String("rule_id", d.ID),
+				slog.String("profile", dto.Name),
+			)
+			continue
+		}
+		sev := model.AuditSeverity(d.Severity)
+		if !knownAuditSeverities[sev] {
+			return nil, fmt.Errorf("bundle profile %q: audit rule %q: unknown severity %q: %w",
+				dto.Name, d.ID, d.Severity, domerr.ErrProfileInvalid)
+		}
+		rawAuditRules = append(rawAuditRules, model.AuditRule{
+			ID:          d.ID,
+			Kind:        kind,
+			Severity:    sev,
+			Description: d.Description,
+			Suggestion:  d.Suggestion,
+			Params:      d.Params,
+		})
+	}
+
 	return &model.ProfileBundle{
-		Profile:      profile,
-		Templates:    templates,
-		RawTypes:     rawTypes,
-		RawPackaging: rawPackaging,
+		Profile:       profile,
+		Templates:     templates,
+		RawTypes:      rawTypes,
+		RawPackaging:  rawPackaging,
+		RawAuditRules: rawAuditRules,
 	}, nil
 }

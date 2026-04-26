@@ -33,6 +33,13 @@ type ProfileBundle struct {
 	// bytes, or nil when the block is absent. EP04US-008 will introduce
 	// the DSL evaluator that consumes these bytes.
 	RawPackaging []byte
+
+	// RawAuditRules carries the profile.yaml `audit_rules:` section
+	// verbatim as the same []AuditRule that LoadAuditRulesPort would
+	// have produced. Empty slice when the bundle has no audit_rules:
+	// key. EP04US-004 introduces this field; the load-time mapper
+	// (bundleMapper.toBundleDomain) populates it.
+	RawAuditRules []AuditRule
 }
 
 // GetTemplate returns the bytes of the named template, keyed by

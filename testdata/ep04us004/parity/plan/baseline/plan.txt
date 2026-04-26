@@ -1,0 +1,8 @@
+plan: create-user (module: user-management)
+Layer 0
+  - CreateUserUseCase (input-port) → port/in/CreateUserUseCase.java
+  - User (aggregate-root) → domain/User.java
+  - UserRepository (output-port) → port/out/UserRepository.java
+Layer 1
+  - UserController (rest-adapter) → adapter/in/web/UserController.java
+  - UserServiceImpl (service) → application/UserServiceImpl.java

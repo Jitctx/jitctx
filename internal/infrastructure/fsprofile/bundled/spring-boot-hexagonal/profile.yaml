@@ -1,46 +1,212 @@
 name: spring-boot-hexagonal
 language: java
-# EP04US-002 introduces declarative architectural types for the bundled
-# profile. The six EP-03 types are reproduced under the new schema.
-# template fields are intentionally empty — templates ship in EP04US-004
-# (parity rebuild). Full target_path, has_test, and packaging blocks are
-# also EP04US-004 work.
+
+# EP04US-004 full-parity rewrite. Source of truth:
+# testdata/auditClean/project/.jitctx/profiles/spring-boot-hexagonal.yaml
+#
+# Q5 accepted gap: aggregate-root classification: [] — the EP-03 codebase
+# derives aggregate-root via field-level inspection (composition over
+# annotations). Reproducing that semantically is deferred beyond EP04US-004.
+
+# Auto-detection (mirrors EP-03 detect.files block).
+detect:
+  files:
+    - name: pom.xml
+      contains: "org.springframework.boot"
+    - name: build.gradle
+      contains: "org.springframework.boot"
+    - name: build.gradle.kts
+      contains: "org.springframework.boot"
+
+# Module detection (mirrors EP-03 module_detection block).
+module_detection:
+  strategy: hexagonal
+  roots:
+    - src/main/java/**/domain
+    - src/main/java/**
+  markers:
+    - kind: path_contains
+      value: /port/in/
+    - kind: path_contains
+      value: /port/out/
+    - kind: annotation
+      value: Entity
+
+# Legacy EP-03 classification rules (first-match-wins, mirrored verbatim).
+rules:
+  - match:
+      node_type: interface_declaration
+      path_contains: /port/in/
+    classify_as: input-port
+
+  - match:
+      node_type: interface_declaration
+      path_contains: /port/out/
+    classify_as: output-port
+
+  - match:
+      node_type: class_declaration
+      has_annotation: Entity
+    classify_as: entity
+
+  - match:
+      node_type: class_declaration
+      has_annotation: RestController
+    classify_as: rest-adapter
+
+  - match:
+      node_type: class_declaration
+      has_annotation: Repository
+    classify_as: jpa-adapter
+
+  - match:
+      node_type: class_declaration
+      implements: "*UseCase"
+      path_contains: /service/
+    classify_as: service
+
+  - match:
+      node_type: class_declaration
+      implements: "*UseCase"
+      path_contains: /application/
+    classify_as: service
+
+  - match:
+      node_type: class_declaration
+      has_annotation: Service
+    classify_as: service
+
+# EP-04 declarative type declarations (classification blocks consumed by
+# service.declarativeClassifier when RawTypes is non-empty).
 types:
   - id: input-port
+    template: inputPort.tmpl
     description: Input port — driving-side interface, named *UseCase by convention.
     classification:
       - kind: interface
         path_contains: /port/in/
 
   - id: output-port
+    template: outputPort.tmpl
     description: Output port — driven-side interface for outbound integrations.
     classification:
       - kind: interface
         path_contains: /port/out/
 
   - id: entity
+    template: entity.tmpl
     description: Domain entity — JPA-annotated persistent class.
     classification:
       - kind: class
         has_annotation: Entity
 
   - id: aggregate-root
-    description: Aggregate root marker — populated declaratively in EP04US-004.
-    # Empty classification in EP04US-002 — the EP-03 codebase derives
-    # aggregate-root via field-level inspection (composition over
-    # annotations). Reproducing that semantically is EP04US-004 scope.
+    template: aggregateRoot.tmpl
+    description: Aggregate root marker — Q5 accepted gap, classification deferred beyond EP04US-004.
+    # Empty classification per Q5=(a) — partial parity accepted.
     classification: []
 
   - id: service
+    template: service.tmpl
     description: Application service implementing one or more input ports.
     classification:
       - kind: class
         implements_all:
           - "*UseCase"
         path_contains: /service/
+      - kind: class
+        implements_all:
+          - "*UseCase"
+        path_contains: /application/
+      - kind: class
+        has_annotation: Service
 
   - id: rest-adapter
+    template: restAdapter.tmpl
     description: REST inbound adapter — Spring @RestController.
     classification:
       - kind: class
         has_annotation: RestController
+
+# Audit rules (verbatim from EP-03 spring-boot-hexagonal.yaml).
+audit_rules:
+  - id: entity-path-mismatch
+    kind: annotation_path_mismatch
+    severity: ERROR
+    description: 'Class @Entity must live under domain/'
+    suggestion: 'Move {file} to a path containing "/domain/"'
+    params:
+      annotation: Entity
+      path_required: /domain/
+
+  - id: rest-controller-path-mismatch
+    kind: annotation_path_mismatch
+    severity: ERROR
+    description: 'Class @RestController must live under adapter/in/web/'
+    suggestion: 'Move {file} to a path containing "/adapter/in/web/"'
+    params:
+      annotation: RestController
+      path_required: /adapter/in/web/
+
+  - id: repository-path-mismatch
+    kind: annotation_path_mismatch
+    severity: ERROR
+    description: 'Class @Repository must live under adapter/out/persistence/'
+    suggestion: 'Move {file} to a path containing "/adapter/out/persistence/"'
+    params:
+      annotation: Repository
+      path_required: /adapter/out/persistence/
+
+  - id: usecase-impl-path-mismatch
+    kind: implements_path_mismatch
+    severity: ERROR
+    description: 'Class implementing *UseCase must live under application/ or service/'
+    suggestion: 'Move {file} to a path containing "/application/" or "/service/"'
+    params:
+      implements_glob: '*UseCase'
+      path_required_any: '/application/,/service/'
+
+  - id: port-naming
+    kind: interface_naming
+    severity: WARNING
+    description: 'Interface in port/in/ must end with UseCase'
+    suggestion: 'Rename {name} to end with UseCase'
+    params:
+      path_required: /port/in/
+      name_suffix: UseCase
+
+  - id: outbound-port-naming
+    kind: interface_naming
+    severity: WARNING
+    description: 'Interface in port/out/ must follow Repository or Gateway naming'
+    suggestion: 'Rename {name} to end with Repository or Gateway'
+    params:
+      path_required: /port/out/
+      name_regex: '.*(Repository|Gateway)$'
+
+  - id: domain-leak
+    kind: forbidden_import
+    severity: ERROR
+    description: 'Files under domain/ must not import org.springframework.*'
+    suggestion: 'Remove the Spring import from {file}; move framework code to an adapter'
+    params:
+      path_scope: /domain/
+      import_prefix: org.springframework.
+
+  - id: domain-adapter-inversion
+    kind: forbidden_import
+    severity: ERROR
+    description: 'Files under domain/ must not import adapter packages'
+    suggestion: 'Remove the adapter import from {file}; depend on output ports instead'
+    params:
+      path_scope: /domain/
+      import_prefix_substring: .adapter.
+
+  - id: adapter-injection
+    kind: field_type_layer_violation
+    severity: ERROR
+    description: 'Service must inject the output port, not an adapter implementation directly'
+    suggestion: 'In {file}, replace the adapter field type with the corresponding output port interface'
+    params:
+      path_scope: /service/
+      forbidden_type_suffix: Jpa

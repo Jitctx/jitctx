@@ -39,6 +39,7 @@ import (
 	domspecsvc "github.com/jitctx/jitctx/internal/domain/service"
 
 	profileport "github.com/jitctx/jitctx/internal/domain/port/profile"
+	specport "github.com/jitctx/jitctx/internal/domain/port/spec"
 )
 
 // bundledProfiles composes the two ISP ports backed by *fsprofile.Bundled so
@@ -92,6 +93,20 @@ type Deps struct {
 	// InitProfile is the profile init use case. Consumed by the new
 	// "profile init" cobra subcommand.
 	InitProfile profileinituc.UseCase
+
+	// BundleAuditRulesLoader satisfies profile.LoadBundleAuditRulesPort.
+	// Backed by *fsprofile.BundleAuditRulesAdapter. EP04US-004.
+	BundleAuditRulesLoader profileport.LoadBundleAuditRulesPort
+
+	// BundleScaffoldRenderer satisfies spec.RenderBundleProductionTemplatePort.
+	// Backed by *fsscaffold.TemplateRegistry's RenderWithBundle method.
+	// EP04US-004.
+	BundleScaffoldRenderer specport.RenderBundleProductionTemplatePort
+
+	// BundleScaffoldTestRenderer satisfies spec.RenderBundleTestTemplatePort.
+	// Backed by *fsscaffold.TestTemplateRegistry's RenderWithBundleTest method.
+	// EP04US-004.
+	BundleScaffoldTestRenderer specport.RenderBundleTestTemplatePort
 }
 
 func Wire(cfg config.Config, logger *slog.Logger) Deps {
@@ -151,6 +166,7 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	jpaAnnotator := domspecsvc.NewJPAFieldAnnotator()
 
 	auditRulesLoader := fsprofile.NewAuditRulesLoader(cfg.ProfilesDir, logger)
+	bundleAuditRulesLoader := fsprofile.NewBundleAuditRulesAdapter() // EP04US-004
 	auditEvaluator := domspecsvc.NewAuditEvaluator()
 
 	jitctxConfigLoader := fsconfig.New(logger)
@@ -205,6 +221,9 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			auditFilter,        // *service.AuditRuleFilter (EP03US-005)
 			auditEvaluator,
 			logger,
+			bundleAuditRulesLoader, // profile.LoadBundleAuditRulesPort (EP04US-004)
+			profileResolver,        // profile.ResolveProfilePort (EP04US-004)
+			cfg.ProfilesDir,        // profilesDir (EP04US-004)
 		),
 		Refactor: func() refactoruc.UseCase {
 			gitReader := fsgit.New(logger)
@@ -218,15 +237,18 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 				logger,
 			)
 		}(),
-		WorkDir:               cfg.WorkDir,
-		PlansDir:              cfg.PlansDir,
-		Logger:                logger,
-		ProfileBundleLoader:   profileBundleLoader,
-		BundledProfiles:       bundled,
-		DeclarativeClassifier: declarativeClassifier,
-		ProfilesDir:           cfg.ProfilesDir,
-		ProfileResolver:       profileResolver,
-		ProfileExtractor:      profileExtractor,
-		InitProfile:           initProfileUC,
+		WorkDir:                    cfg.WorkDir,
+		PlansDir:                   cfg.PlansDir,
+		Logger:                     logger,
+		ProfileBundleLoader:        profileBundleLoader,
+		BundledProfiles:            bundled,
+		DeclarativeClassifier:      declarativeClassifier,
+		ProfilesDir:                cfg.ProfilesDir,
+		ProfileResolver:            profileResolver,
+		ProfileExtractor:           profileExtractor,
+		InitProfile:                initProfileUC,
+		BundleAuditRulesLoader:     bundleAuditRulesLoader, // EP04US-004
+		BundleScaffoldRenderer:     scaffoldRegistry,       // EP04US-004
+		BundleScaffoldTestRenderer: scaffoldTestRegistry,   // EP04US-004
 	}
 }

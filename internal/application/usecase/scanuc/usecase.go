@@ -129,7 +129,7 @@ func (u *Impl) Execute(ctx context.Context, input scanvo.ScanProjectInput) (scan
 	if err := ctx.Err(); err != nil {
 		return scanvo.ScanProjectOutput{}, err
 	}
-	modules, err := service.BuildModules(ctx, u.declarativeClassifier, summaries, prof, nil)
+	modules, err := service.BuildModules(ctx, u.declarativeClassifier, summaries, prof, bundle.RawTypes)
 	if err != nil {
 		return scanvo.ScanProjectOutput{}, fmt.Errorf("build modules: %w", err)
 	}

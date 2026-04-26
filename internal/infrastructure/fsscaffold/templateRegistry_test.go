@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
+	"github.com/jitctx/jitctx/internal/domain/model"
 	scaffoldvo "github.com/jitctx/jitctx/internal/domain/vo/scaffold"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsscaffold"
 )
@@ -635,4 +636,122 @@ func TestTestTemplateRegistry_Render(t *testing.T) {
 
 		require.Equal(t, first, second, "renders must be byte-identical (RNF-002)")
 	})
+}
+
+func TestTemplateRegistry_RenderWithBundle_UsesBundleTemplate(t *testing.T) {
+	t.Parallel()
+
+	reg := fsscaffold.NewRegistry()
+	bundle := &model.ProfileBundle{
+		Templates: map[string][]byte{
+			// "service" maps to templateNameByType["service"] = "service", key = "service.tmpl"
+			"service.tmpl": []byte(`// BUNDLE-{{.ClassName}}`),
+		},
+	}
+	in := scaffoldvo.RenderInput{
+		ContractType: "service",
+		Package:      "com.app.user.application",
+		ClassName:    "UserServiceImpl",
+		Imports:      []string{},
+	}
+
+	out, err := reg.RenderWithBundle(t.Context(), bundle, in)
+	require.NoError(t, err)
+
+	got := string(out)
+	require.Equal(t, "// BUNDLE-UserServiceImpl", got,
+		"RenderWithBundle must use the bundle template, not the embedded one")
+}
+
+func TestTemplateRegistry_RenderWithBundle_FallsBackToEmbedded(t *testing.T) {
+	t.Parallel()
+
+	reg := fsscaffold.NewRegistry()
+	// Bundle with empty Templates map — no template for "service".
+	bundle := &model.ProfileBundle{
+		Templates: map[string][]byte{},
+	}
+	in := scaffoldvo.RenderInput{
+		ContractType: "service",
+		Package:      "com.app.user.application",
+		ClassName:    "UserServiceImpl",
+		Imports: []string{
+			"org.springframework.stereotype.Service",
+		},
+		ClassAnnotations: []string{"@Service"},
+		Implements:       "CreateUserUseCase",
+		Dependencies:     []scaffoldvo.ConstructorDep{},
+		Methods:          []scaffoldvo.RenderedMethod{},
+	}
+
+	bundleOut, err := reg.RenderWithBundle(t.Context(), bundle, in)
+	require.NoError(t, err)
+
+	embeddedOut, err := reg.Render(t.Context(), in)
+	require.NoError(t, err)
+
+	require.Equal(t, embeddedOut, bundleOut,
+		"RenderWithBundle must fall back to embedded template when bundle has no matching entry")
+}
+
+func TestTestTemplateRegistry_RenderWithBundleTest_UsesBundleTemplate(t *testing.T) {
+	t.Parallel()
+
+	reg := fsscaffold.NewTestRegistry()
+	bundle := &model.ProfileBundle{
+		Templates: map[string][]byte{
+			// "service" maps to testTemplateNameByType["service"] = "serviceTest", key = "serviceTest.tmpl"
+			"serviceTest.tmpl": []byte(`// BUNDLE-{{.ClassName}}`),
+		},
+	}
+	in := scaffoldvo.TestRenderInput{
+		ContractType: "service",
+		Package:      "com.app.user.application",
+		ClassName:    "UserServiceImpl",
+		Imports:      []string{},
+	}
+
+	out, err := reg.RenderWithBundleTest(t.Context(), bundle, in)
+	require.NoError(t, err)
+
+	got := string(out)
+	require.Equal(t, "// BUNDLE-UserServiceImpl", got,
+		"RenderWithBundleTest must use the bundle template, not the embedded one")
+}
+
+func TestTestTemplateRegistry_RenderWithBundleTest_FallsBackToEmbedded(t *testing.T) {
+	t.Parallel()
+
+	reg := fsscaffold.NewTestRegistry()
+	// Bundle with empty Templates map — no template for "serviceTest".
+	bundle := &model.ProfileBundle{
+		Templates: map[string][]byte{},
+	}
+	in := scaffoldvo.TestRenderInput{
+		ContractType: "service",
+		Package:      "com.app.user.application",
+		ClassName:    "UserServiceImpl",
+		Imports: []string{
+			"org.junit.jupiter.api.Test",
+			"org.junit.jupiter.api.extension.ExtendWith",
+			"org.mockito.InjectMocks",
+			"org.mockito.Mock",
+			"org.mockito.junit.jupiter.MockitoExtension",
+		},
+		Mocks: []scaffoldvo.TestMockField{
+			{Type: "UserRepository", FieldName: "userRepository"},
+		},
+		TestMethods: []scaffoldvo.TestMethod{
+			{Name: "execute_shouldDoSomething", Body: "// TODO: implement test"},
+		},
+	}
+
+	bundleOut, err := reg.RenderWithBundleTest(t.Context(), bundle, in)
+	require.NoError(t, err)
+
+	embeddedOut, err := reg.Render(t.Context(), in)
+	require.NoError(t, err)
+
+	require.Equal(t, embeddedOut, bundleOut,
+		"RenderWithBundleTest must fall back to embedded template when bundle has no matching entry")
 }

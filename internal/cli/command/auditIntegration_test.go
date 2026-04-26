@@ -39,6 +39,11 @@ func newAuditCmdFor(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, 
 	configLoader := fsconfig.New(logger)
 	auditFilter := service.NewAuditRuleFilter()
 
+	bundleAuditRulesLoader := fsprofile.NewBundleAuditRulesAdapter()
+	bundled := fsprofile.NewBundled()
+	bundleLoader := fsprofile.NewBundleLoader(logger)
+	resolver := fsprofile.NewResolver(bundleLoader, bundled, logger)
+
 	uc := appaudituc.New(
 		manifestStore,
 		profileDetector,
@@ -50,6 +55,9 @@ func newAuditCmdFor(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, 
 		auditFilter,
 		evaluator,
 		logger,
+		bundleAuditRulesLoader, // EP04US-004
+		resolver,               // EP04US-004
+		filepath.Join(workDir, ".jitctx", "profiles"), // EP04US-004
 	)
 
 	var stdout, stderr bytes.Buffer

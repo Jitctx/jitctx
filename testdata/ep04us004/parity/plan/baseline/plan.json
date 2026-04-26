@@ -1,0 +1,35 @@
+{
+  "feature": "create-user",
+  "module": "user-management",
+  "layers": [
+    [
+      {
+        "name": "CreateUserUseCase",
+        "type": "input-port",
+        "target_path": "port/in/CreateUserUseCase.java"
+      },
+      {
+        "name": "User",
+        "type": "aggregate-root",
+        "target_path": "domain/User.java"
+      },
+      {
+        "name": "UserRepository",
+        "type": "output-port",
+        "target_path": "port/out/UserRepository.java"
+      }
+    ],
+    [
+      {
+        "name": "UserController",
+        "type": "rest-adapter",
+        "target_path": "adapter/in/web/UserController.java"
+      },
+      {
+        "name": "UserServiceImpl",
+        "type": "service",
+        "target_path": "application/UserServiceImpl.java"
+      }
+    ]
+  ]
+}

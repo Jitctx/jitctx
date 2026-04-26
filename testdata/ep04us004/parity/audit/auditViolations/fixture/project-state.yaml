@@ -1,0 +1,41 @@
+schema_version: 2
+generated_at: 2026-04-25T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: user
+    path: src/main/java/com/app/user
+    tags: []
+    contracts:
+      - name: UserDB
+        types:
+          - entity
+        path: src/main/java/com/app/user/UserDB.java
+        methods: []
+      - name: UserController
+        types:
+          - rest-adapter
+        path: src/main/java/com/app/user/UserController.java
+        methods: []
+      - name: User
+        types:
+          - entity
+        path: src/main/java/com/app/user/domain/User.java
+        methods: []
+      - name: CreateUser
+        types:
+          - input-port
+        path: src/main/java/com/app/user/port/in/CreateUser.java
+        methods:
+          - signature: User execute(String name, String email)
+      - name: UserService
+        types:
+          - service
+        path: src/main/java/com/app/user/service/UserService.java
+        methods:
+          - signature: User execute(String name, String email)
+    dependencies: []
+contexts: []

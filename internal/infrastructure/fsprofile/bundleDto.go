@@ -17,12 +17,13 @@ type bundleDTO struct {
 	Language  string   `yaml:"language"`  // singular — EP-04 schema
 	Languages []string `yaml:"languages"` // legacy plural — kept so the
 	//  same decoder works on EP-03 sample files
-	QueryLang       string             `yaml:"query_lang"`       // legacy EP-03
-	Detect          bundleDetectDTO    `yaml:"detect"`           // legacy EP-03
-	ModuleDetection bundleModuleDetDTO `yaml:"module_detection"` // legacy EP-03
-	Rules           []bundleRuleDTO    `yaml:"rules"`            // legacy EP-03
-	Types           []bundleTypeDTO    `yaml:"types"`
-	Packaging       *yaml.Node         `yaml:"packaging"`
+	QueryLang       string               `yaml:"query_lang"`       // legacy EP-03
+	Detect          bundleDetectDTO      `yaml:"detect"`           // legacy EP-03
+	ModuleDetection bundleModuleDetDTO   `yaml:"module_detection"` // legacy EP-03
+	Rules           []bundleRuleDTO      `yaml:"rules"`            // legacy EP-03
+	Types           []bundleTypeDTO      `yaml:"types"`
+	AuditRules      []bundleAuditRuleDTO `yaml:"audit_rules"`
+	Packaging       *yaml.Node           `yaml:"packaging"`
 }
 
 // bundleDetectDTO mirrors detectDTO for the legacy flat-YAML schema.
@@ -68,6 +69,17 @@ type bundleTypeDTO struct {
 	Template       string                    `yaml:"template"`
 	Description    string                    `yaml:"description"`
 	Classification []bundleClassificationDTO `yaml:"classification"`
+}
+
+// bundleAuditRuleDTO mirrors auditRuleDTO for the bundled/directory-shape schema.
+// It maps one-to-one to model.AuditRule at load time (bundleMapper.toBundleDomain).
+type bundleAuditRuleDTO struct {
+	ID          string            `yaml:"id"`
+	Kind        string            `yaml:"kind"`
+	Severity    string            `yaml:"severity"`
+	Description string            `yaml:"description"`
+	Suggestion  string            `yaml:"suggestion"`
+	Params      map[string]string `yaml:"params"`
 }
 
 // bundleClassificationDTO mirrors model.ClassificationRule one-to-one.

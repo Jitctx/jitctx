@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
+	"github.com/jitctx/jitctx/internal/domain/model"
 )
 
 // TestToBundleDomain exercises the pure toBundleDomain mapper without any I/O.
@@ -28,7 +29,7 @@ func TestToBundleDomain_HappyPath(t *testing.T) {
 		"service.java.tmpl": []byte("// stub"),
 	}
 
-	bundle, err := toBundleDomain(dto, templates)
+	bundle, err := toBundleDomain(dto, templates, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, bundle)
@@ -53,7 +54,7 @@ func TestToBundleDomain_MissingTemplate(t *testing.T) {
 	}
 	templates := map[string][]byte{} // empty — template not loaded
 
-	_, err := toBundleDomain(dto, templates)
+	_, err := toBundleDomain(dto, templates, nil)
 
 	require.Error(t, err)
 
@@ -78,7 +79,7 @@ func TestToBundleDomain_TypeWithoutTemplate(t *testing.T) {
 	// Even an empty templates map should not trigger an error when Template == "".
 	templates := map[string][]byte{}
 
-	bundle, err := toBundleDomain(dto, templates)
+	bundle, err := toBundleDomain(dto, templates, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, bundle)
@@ -96,7 +97,7 @@ func TestToBundleDomain_EmptyTypesList(t *testing.T) {
 		Types:    nil,
 	}
 
-	bundle, err := toBundleDomain(dto, map[string][]byte{})
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, bundle)
@@ -120,7 +121,7 @@ func TestToBundleDomain_MultipleTypes(t *testing.T) {
 		"repository.java.tmpl": []byte("// repository stub"),
 	}
 
-	bundle, err := toBundleDomain(dto, templates)
+	bundle, err := toBundleDomain(dto, templates, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, bundle)
@@ -149,7 +150,7 @@ func TestToBundleDomain_LegacyLanguagesField(t *testing.T) {
 		Types:     nil,
 	}
 
-	bundle, err := toBundleDomain(dto, map[string][]byte{})
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, bundle)
@@ -167,7 +168,7 @@ func TestToBundleDomain_SingularLanguagePromotedToSlice(t *testing.T) {
 		Types:    nil,
 	}
 
-	bundle, err := toBundleDomain(dto, map[string][]byte{})
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, bundle)
@@ -209,7 +210,7 @@ func TestToBundleDomain_PackagingBlockForwarded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			bundle, err := toBundleDomain(tc.dto, map[string][]byte{})
+			bundle, err := toBundleDomain(tc.dto, map[string][]byte{}, nil)
 
 			require.NoError(t, err)
 			require.NotNil(t, bundle)
@@ -248,7 +249,7 @@ func TestToBundleDomain_MissingIDReturnsError(t *testing.T) {
 		},
 	}
 
-	_, err := toBundleDomain(dto, map[string][]byte{"service.java.tmpl": []byte("stub")})
+	_, err := toBundleDomain(dto, map[string][]byte{"service.java.tmpl": []byte("stub")}, nil)
 
 	require.Error(t, err)
 	require.True(t, errors.Is(err, domerr.ErrProfileInvalid))
@@ -278,7 +279,7 @@ func TestToBundleDomain_PreservesClassificationRules(t *testing.T) {
 		},
 	}
 
-	bundle, err := toBundleDomain(dto, map[string][]byte{})
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
 
 	require.NoError(t, err)
 	require.Len(t, bundle.RawTypes, 1)
@@ -308,7 +309,7 @@ func TestToBundleDomain_PreservesDescription(t *testing.T) {
 		},
 	}
 
-	bundle, err := toBundleDomain(dto, map[string][]byte{})
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
 
 	require.NoError(t, err)
 	require.Len(t, bundle.RawTypes, 1)
@@ -334,7 +335,7 @@ func TestToBundleDomain_RawTypeBytesAreRoundTripped(t *testing.T) {
 		},
 	}
 
-	bundle, err := toBundleDomain(dto, map[string][]byte{})
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
 
 	require.NoError(t, err)
 	require.Len(t, bundle.RawTypes, 1)
@@ -370,7 +371,7 @@ func TestToBundleDomain_SliceCopiesNotAliased(t *testing.T) {
 		},
 	}
 
-	bundle, err := toBundleDomain(dto, map[string][]byte{})
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
 	require.NoError(t, err)
 
 	// Mutate the source DTO slice AFTER the mapper has run.
@@ -378,4 +379,79 @@ func TestToBundleDomain_SliceCopiesNotAliased(t *testing.T) {
 
 	// The produced model slice must not reflect the mutation.
 	require.Equal(t, "X", bundle.RawTypes[0].Classification[0].ImplementsAll[0])
+}
+
+// --- EP04US-004 tests (T6-G2) ---
+
+func TestToBundleDomain_PreservesAuditRules(t *testing.T) {
+	t.Parallel()
+
+	dto := bundleDTO{
+		Name:     "audit-profile",
+		Language: "java",
+		AuditRules: []bundleAuditRuleDTO{
+			{
+				ID:          "rule-annotation-path",
+				Kind:        "annotation_path_mismatch",
+				Severity:    "ERROR",
+				Description: "Annotation does not match path",
+				Suggestion:  "Move class to correct package",
+				Params:      map[string]string{"annotation": "Service", "path_required": "service"},
+			},
+			{
+				ID:          "rule-interface-naming",
+				Kind:        "interface_naming",
+				Severity:    "WARNING",
+				Description: "Interface name must start with I",
+				Suggestion:  "Rename the interface",
+				Params:      nil,
+			},
+		},
+	}
+
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, bundle)
+	require.Len(t, bundle.RawAuditRules, 2)
+
+	r0 := bundle.RawAuditRules[0]
+	require.Equal(t, "rule-annotation-path", r0.ID)
+	require.Equal(t, model.AuditKindAnnotationPathMismatch, r0.Kind)
+	require.Equal(t, model.AuditSeverityError, r0.Severity)
+	require.Equal(t, map[string]string{"annotation": "Service", "path_required": "service"}, r0.Params)
+
+	r1 := bundle.RawAuditRules[1]
+	require.Equal(t, "rule-interface-naming", r1.ID)
+	require.Equal(t, model.AuditKindInterfaceNaming, r1.Kind)
+	require.Equal(t, model.AuditSeverityWarning, r1.Severity)
+}
+
+func TestToBundleDomain_DropsUnknownKindAuditRules(t *testing.T) {
+	t.Parallel()
+
+	dto := bundleDTO{
+		Name:     "drop-unknown-kind-profile",
+		Language: "java",
+		AuditRules: []bundleAuditRuleDTO{
+			{
+				ID:       "valid-rule",
+				Kind:     "annotation_path_mismatch",
+				Severity: "ERROR",
+			},
+			{
+				ID:       "unknown-kind-rule",
+				Kind:     "fake-kind-not-in-knownAuditRuleKinds",
+				Severity: "ERROR",
+			},
+		},
+	}
+
+	bundle, err := toBundleDomain(dto, map[string][]byte{}, nil)
+
+	// Unknown kind is dropped silently (WARN logged); no error returned.
+	require.NoError(t, err)
+	require.NotNil(t, bundle)
+	require.Len(t, bundle.RawAuditRules, 1)
+	require.Equal(t, "valid-rule", bundle.RawAuditRules[0].ID)
 }

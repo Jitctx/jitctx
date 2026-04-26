@@ -1,0 +1,86 @@
+schema_version: 2
+generated_at: 2026-04-17T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: broken
+    path: src/main/java/com/app/broken
+    tags: []
+    contracts:
+      - name: Broken
+        types: []
+        path: src/main/java/com/app/broken/Broken.java
+        methods:
+          - signature: void doSomething()
+    dependencies: []
+  - id: notification
+    path: src/main/java/com/app/notification
+    tags: []
+    contracts:
+      - name: SendNotificationUseCase
+        types:
+          - input-port
+        path: src/main/java/com/app/notification/port/in/SendNotificationUseCase.java
+        methods:
+          - signature: void send(String recipient, String message)
+    dependencies: []
+  - id: user-management
+    path: src/main/java/com/app/user_management
+    tags: []
+    contracts:
+      - name: UserController
+        types:
+          - rest-adapter
+        path: src/main/java/com/app/user_management/adapter/in/web/UserController.java
+        methods: []
+      - name: User
+        types:
+          - entity
+        path: src/main/java/com/app/user_management/domain/User.java
+        methods: []
+      - name: CreateUserUseCase
+        types:
+          - input-port
+        path: src/main/java/com/app/user_management/port/in/CreateUserUseCase.java
+        methods:
+          - signature: User execute(String name, String email)
+      - name: UserRepository
+        types:
+          - output-port
+        path: src/main/java/com/app/user_management/port/out/UserRepository.java
+        methods:
+          - signature: Optional<User> findById(Long id)
+          - signature: User save(User user)
+      - name: CreateUserServiceImpl
+        types:
+          - service
+        path: src/main/java/com/app/user_management/service/CreateUserServiceImpl.java
+        methods:
+          - signature: User execute(String name, String email)
+      - name: UserServiceImpl
+        types:
+          - service
+        path: src/main/java/com/app/user_management/service/UserServiceImpl.java
+        methods:
+          - signature: User execute(String name, String email)
+    dependencies:
+      - notification
+contexts:
+  - id: java-conventions
+    type: guidelines
+    tags:
+      - hexagonal
+      - java
+      - naming
+    path: .jitctx/guidelines/java-conventions.md
+    token_estimate: 35
+  - id: user-scenarios
+    type: guidelines
+    module: user-management
+    tags:
+      - user
+    path: .jitctx/guidelines/user-scenarios.md
+    token_estimate: 36

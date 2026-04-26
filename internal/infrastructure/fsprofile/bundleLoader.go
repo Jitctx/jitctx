@@ -62,7 +62,7 @@ func (l *BundleLoader) loadFromOS(_ context.Context, dir string) (*model.Profile
 	if !info.IsDir() {
 		return nil, fmt.Errorf("profile path %q is not a directory: %w", abs, domerr.ErrProfileInvalid)
 	}
-	bundle, err := loadFromFS(os.DirFS(abs))
+	bundle, err := loadFromFS(os.DirFS(abs), l.logger)
 	if err != nil {
 		return nil, fmt.Errorf("profile bundle %q: %w", abs, err)
 	}
@@ -73,8 +73,9 @@ func (l *BundleLoader) loadFromOS(_ context.Context, dir string) (*model.Profile
 
 // loadFromFS is the shared core used by both BundleLoader (OS-backed fs.FS)
 // and Bundled (embed.FS sub-filesystem). The caller sets Dir and Source after
-// this returns.
-func loadFromFS(fsys fs.FS) (*model.ProfileBundle, error) {
+// this returns. logger is forwarded to toBundleDomain for WARN entries; when
+// nil, slog.Default() is used.
+func loadFromFS(fsys fs.FS, logger *slog.Logger) (*model.ProfileBundle, error) {
 	// Step 1: read profile.yaml.
 	data, err := fs.ReadFile(fsys, "profile.yaml")
 	if err != nil {
@@ -116,7 +117,7 @@ func loadFromFS(fsys fs.FS) (*model.ProfileBundle, error) {
 	}
 
 	// Step 4: assemble the bundle via the pure mapper (validates types, packaging).
-	bundle, err := toBundleDomain(dto, templates)
+	bundle, err := toBundleDomain(dto, templates, logger)
 	if err != nil {
 		return nil, err
 	}

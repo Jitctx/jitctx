@@ -46,7 +46,7 @@ func (b *Bundled) LoadBundled(ctx context.Context, name string) (*model.ProfileB
 		}
 		return nil, fmt.Errorf("bundled %q: stat profile.yaml: %w", name, err)
 	}
-	bundle, err := loadFromFS(sub)
+	bundle, err := loadFromFS(sub, nil)
 	if err != nil {
 		return nil, fmt.Errorf("bundled %q: %w", name, err)
 	}

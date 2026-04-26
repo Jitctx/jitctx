@@ -10,17 +10,22 @@ package model
 //	                  match in US-002). Empty string = no constraint.
 //	ImplementsAll   — every name in this list must appear in the declaration's
 //	                  implemented-interfaces list (subset match — extras allowed).
+//	                  Each entry is a single-`*` glob (anchored at start AND
+//	                  end of the implemented-interface name): "*UseCase" matches
+//	                  any interface ending in "UseCase"; "Foo*" matches any
+//	                  starting with "Foo"; "Foo" requires literal equality.
+//	                  Java identifiers cannot contain `*`, so existing literal
+//	                  entries written before EP04US-004 keep matching exactly
+//	                  the same set of declarations.
 //	                  nil/empty = no constraint.
-//	ImplementsNone  — if ANY name in this list appears in the declaration's
-//	                  implemented-interfaces list, the rule fails.
+//	ImplementsNone  — same glob semantics as ImplementsAll. If ANY name in
+//	                  the declaration's implemented-interfaces list matches
+//	                  ANY pattern in this slice, the rule fails.
 //	                  nil/empty = no constraint.
 //	HasAnnotation   — single annotation name, case-insensitive, "@" prefix
 //	                  tolerated. Empty string = no constraint.
 //	PathContains    — substring match against the forward-slash file path.
 //	                  Empty string = no constraint.
-//
-// Future fields (path_matches, has_annotations_any, extends) are deferred
-// to EP04US-004; YAML decoding is lenient so authoring them now is harmless.
 type ClassificationRule struct {
 	Kind           string
 	ImplementsAll  []string

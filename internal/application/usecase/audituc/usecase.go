@@ -18,6 +18,7 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/port/profile"
 	"github.com/jitctx/jitctx/internal/domain/service"
 	auditvo "github.com/jitctx/jitctx/internal/domain/vo/audit"
+	profilevo "github.com/jitctx/jitctx/internal/domain/vo/profile"
 )
 
 // Impl satisfies audituc.UseCase.
@@ -32,10 +33,28 @@ type Impl struct {
 	filter     *service.AuditRuleFilter    // EP03US-005
 	evaluator  *service.AuditEvaluator
 	logger     *slog.Logger
+
+	// bundleAuditRules is the bundle-shaped audit rules loader. nil-safe:
+	// when nil OR when the active profile is not bundle-shaped, the
+	// legacy auditRules path is used.
+	bundleAuditRules profile.LoadBundleAuditRulesPort // EP04US-004
+
+	// resolver is consulted only when the legacy DetectProfilePort
+	// returns ErrNoProfileMatch (i.e., the project has no single-file
+	// YAML and might have a directory-shaped bundle). nil-safe.
+	resolver profile.ResolveProfilePort // EP04US-004
+
+	// profilesDir mirrors scanuc — needed when resolver is consulted.
+	profilesDir string // EP04US-004
 }
 
 // New creates a new audituc.Impl with all required ports injected.
 // The constructor accepts only read-shaped ports (RNF-002 read-only enforcement).
+//
+// EP04US-004: three new parameters appended at the end (least disruption):
+//   - bundleAuditRules: loads audit rules from a directory-shaped bundle.
+//   - resolver: resolves the active profile when legacy detection misses.
+//   - profilesDir: profiles directory passed to the resolver.
 func New(
 	manifests manifest.LoadManifestPort,
 	profiles profile.DetectProfilePort,
@@ -47,18 +66,24 @@ func New(
 	filter *service.AuditRuleFilter, // EP03US-005
 	evaluator *service.AuditEvaluator,
 	logger *slog.Logger,
+	bundleAuditRules profile.LoadBundleAuditRulesPort, // EP04US-004 NEW
+	resolver profile.ResolveProfilePort, // EP04US-004 NEW
+	profilesDir string, // EP04US-004 NEW
 ) *Impl {
 	return &Impl{
-		manifests:  manifests,
-		profiles:   profiles,
-		auditRules: auditRules,
-		walker:     walker,
-		parseFile:  parseFile,
-		listFields: listFields,
-		config:     cfg,
-		filter:     filter,
-		evaluator:  evaluator,
-		logger:     logger,
+		manifests:        manifests,
+		profiles:         profiles,
+		auditRules:       auditRules,
+		walker:           walker,
+		parseFile:        parseFile,
+		listFields:       listFields,
+		config:           cfg,
+		filter:           filter,
+		evaluator:        evaluator,
+		logger:           logger,
+		bundleAuditRules: bundleAuditRules,
+		resolver:         resolver,
+		profilesDir:      profilesDir,
 	}
 }
 
@@ -105,10 +130,28 @@ func (u *Impl) Execute(ctx context.Context, in auditvo.AuditProjectInput) (audit
 		fsys = os.DirFS(in.WorkDir)
 	}
 
-	// Step 4: detect active profile (mirrors scanuc pattern).
+	// Step 4: detect active profile.
+	// 4a. Try the legacy single-file detector first.
+	// 4b. If it returns ErrNoProfileMatch AND u.resolver != nil, fall back to
+	//     the bundle resolver (directory-shaped profile).
+	// 4c. If both fail, propagate the original detect error.
+	var bundle *model.ProfileBundle
 	prof, err := u.profiles.Detect(ctx, fsys)
 	if err != nil {
-		return auditvo.AuditProjectOutput{}, err
+		if errors.Is(err, domerr.ErrNoProfileMatch) && u.resolver != nil {
+			var resolveErr error
+			bundle, resolveErr = u.resolver.Resolve(ctx, profilevo.ResolveProfileInput{
+				Name:        in.ProfileName,
+				WorkDir:     in.WorkDir,
+				ProfilesDir: u.profilesDir,
+			})
+			if resolveErr != nil {
+				return auditvo.AuditProjectOutput{}, err // return original detect error
+			}
+			prof = bundle.Profile
+		} else {
+			return auditvo.AuditProjectOutput{}, err
+		}
 	}
 	if in.ProfileName != "" && in.ProfileName != prof.Name {
 		return auditvo.AuditProjectOutput{}, fmt.Errorf(
@@ -116,9 +159,20 @@ func (u *Impl) Execute(ctx context.Context, in auditvo.AuditProjectInput) (audit
 	}
 
 	// Step 5: load audit rules. An empty slice is valid (clean-state profile).
-	rules, err := u.auditRules.LoadAuditRules(ctx, prof.Name)
-	if err != nil {
-		return auditvo.AuditProjectOutput{}, fmt.Errorf("audit: load rules: %w", err)
+	// 5a. If a bundle was resolved in step 4b AND u.bundleAuditRules != nil, use
+	//     the bundle-shaped loader.
+	// 5b. Otherwise, use the legacy single-file loader.
+	var rules []model.AuditRule
+	if bundle != nil && u.bundleAuditRules != nil {
+		rules, err = u.bundleAuditRules.LoadBundleAuditRules(ctx, bundle)
+		if err != nil {
+			return auditvo.AuditProjectOutput{}, fmt.Errorf("audit: load bundle rules: %w", err)
+		}
+	} else {
+		rules, err = u.auditRules.LoadAuditRules(ctx, prof.Name)
+		if err != nil {
+			return auditvo.AuditProjectOutput{}, fmt.Errorf("audit: load rules: %w", err)
+		}
 	}
 
 	// Step 5a (EP03US-005): load .jitctx/config.yaml. Missing file → empty config.

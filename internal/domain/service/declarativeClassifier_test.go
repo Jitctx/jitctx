@@ -421,3 +421,231 @@ func TestDeclarativeClassifier_ContextCancelled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, got)
 }
+
+// --- Glob primitive table (§2.7) ---
+
+// TestDeclarativeClassifier_GlobImplementsAll_LiteralStillMatches verifies
+// backward-compatibility: a literal pattern (no wildcard) in implements_all
+// still performs exact matching.
+func TestDeclarativeClassifier_GlobImplementsAll_LiteralStillMatches(t *testing.T) {
+	t.Parallel()
+
+	c := service.NewDeclarativeClassifier()
+	types := []model.ProfileTypeDeclaration{
+		typeWith("repo", rule("", "", "", []string{"UserRepository"}, nil)),
+	}
+
+	cases := []struct {
+		name    string
+		impls   []string
+		wantTag bool
+	}{
+		{
+			name:    "exact match",
+			impls:   []string{"UserRepository", "Other"},
+			wantTag: true,
+		},
+		{
+			name:    "no match — different name",
+			impls:   []string{"AdminRepository"},
+			wantTag: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			input := newInput("class_declaration", "src/infra/Repo.java", tc.impls, nil)
+			got, err := c.ClassifyDeclarative(t.Context(), input, types)
+			require.NoError(t, err)
+			if tc.wantTag {
+				require.Equal(t, []string{"repo"}, got)
+			} else {
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
+// TestDeclarativeClassifier_GlobImplementsAll_TrailingStar pins the EP-03
+// service rule shape: implements_all: ["*UseCase"] matches a class that
+// implements CreateUserUseCase (suffix glob) but does NOT match a class that
+// implements UseCaseHelper (the suffix "UseCase" is not at the end).
+func TestDeclarativeClassifier_GlobImplementsAll_TrailingStar(t *testing.T) {
+	t.Parallel()
+
+	c := service.NewDeclarativeClassifier()
+	types := []model.ProfileTypeDeclaration{
+		typeWith("service", rule("", "", "", []string{"*UseCase"}, nil)),
+	}
+
+	cases := []struct {
+		name    string
+		impls   []string
+		wantTag bool
+	}{
+		{
+			name:    "suffix glob matches",
+			impls:   []string{"CreateUserUseCase"},
+			wantTag: true,
+		},
+		{
+			name:    "prefix-only does not satisfy suffix glob",
+			impls:   []string{"UseCaseHelper"},
+			wantTag: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			input := newInput("class_declaration", "src/application/Svc.java", tc.impls, nil)
+			got, err := c.ClassifyDeclarative(t.Context(), input, types)
+			require.NoError(t, err)
+			if tc.wantTag {
+				require.Equal(t, []string{"service"}, got)
+			} else {
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
+// TestDeclarativeClassifier_GlobImplementsAll_LeadingStar pins the prefix-glob
+// behaviour: implements_all: ["User*"] matches UserRepository but not
+// AdminRepository.
+func TestDeclarativeClassifier_GlobImplementsAll_LeadingStar(t *testing.T) {
+	t.Parallel()
+
+	c := service.NewDeclarativeClassifier()
+	types := []model.ProfileTypeDeclaration{
+		typeWith("repo", rule("", "", "", []string{"Use*"}, nil)),
+	}
+
+	cases := []struct {
+		name    string
+		impls   []string
+		wantTag bool
+	}{
+		{
+			name:    "prefix glob matches",
+			impls:   []string{"UseCase"},
+			wantTag: true,
+		},
+		{
+			name:    "non-matching prefix not tagged",
+			impls:   []string{"NotUse"},
+			wantTag: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			input := newInput("class_declaration", "src/domain/Cls.java", tc.impls, nil)
+			got, err := c.ClassifyDeclarative(t.Context(), input, types)
+			require.NoError(t, err)
+			if tc.wantTag {
+				require.Equal(t, []string{"repo"}, got)
+			} else {
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
+// TestDeclarativeClassifier_GlobImplementsAll_MultiplePatterns verifies AND
+// semantics across the implements_all array: each pattern must be satisfied by
+// at least one entry in the class's implements list, independently.
+func TestDeclarativeClassifier_GlobImplementsAll_MultiplePatterns(t *testing.T) {
+	t.Parallel()
+
+	c := service.NewDeclarativeClassifier()
+	types := []model.ProfileTypeDeclaration{
+		typeWith("svc", rule("", "", "", []string{"*UseCase", "Use*"}, nil)),
+	}
+
+	cases := []struct {
+		name    string
+		impls   []string
+		wantTag bool
+	}{
+		{
+			name:    "both patterns satisfied",
+			impls:   []string{"CreateUserUseCase", "UsePort"},
+			wantTag: true,
+		},
+		{
+			name:    "only first pattern satisfied",
+			impls:   []string{"CreateUserUseCase"},
+			wantTag: false,
+		},
+		{
+			name:    "only second pattern satisfied",
+			impls:   []string{"UsePort"},
+			wantTag: false,
+		},
+		{
+			name:    "neither pattern satisfied",
+			impls:   []string{"Repository"},
+			wantTag: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			input := newInput("class_declaration", "src/app/Svc.java", tc.impls, nil)
+			got, err := c.ClassifyDeclarative(t.Context(), input, types)
+			require.NoError(t, err)
+			if tc.wantTag {
+				require.Equal(t, []string{"svc"}, got)
+			} else {
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
+// TestDeclarativeClassifier_GlobImplementsNone_StarWildcard verifies that
+// glob semantics apply to implements_none: a class implementing TestMarker
+// is NOT tagged when the rule has implements_none: ["*Marker"].
+func TestDeclarativeClassifier_GlobImplementsNone_StarWildcard(t *testing.T) {
+	t.Parallel()
+
+	c := service.NewDeclarativeClassifier()
+	types := []model.ProfileTypeDeclaration{
+		typeWith("svc", rule("", "", "", nil, []string{"*Marker"})),
+	}
+
+	cases := []struct {
+		name    string
+		impls   []string
+		wantTag bool
+	}{
+		{
+			name:    "implements_none glob excludes matching class",
+			impls:   []string{"TestMarker"},
+			wantTag: false,
+		},
+		{
+			name:    "non-matching class is still tagged",
+			impls:   []string{"Repository"},
+			wantTag: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			input := newInput("class_declaration", "src/domain/Cls.java", tc.impls, nil)
+			got, err := c.ClassifyDeclarative(t.Context(), input, types)
+			require.NoError(t, err)
+			if tc.wantTag {
+				require.Equal(t, []string{"svc"}, got)
+			} else {
+				require.Empty(t, got)
+			}
+		})
+	}
+}
