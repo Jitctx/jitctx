@@ -27,6 +27,17 @@ type AuditProjectOutput struct {
 	// The renderer emits it under "## Semantic Analysis". Centralised here
 	// so unit tests can assert the string verbatim (RNF-005).
 	SemanticPlaceholder string
+
+	// UnknownDisabledRules is the sorted, deduped list of audit rule IDs
+	// that appeared under `audit.disabled_rules` in `.jitctx/config.yaml`
+	// but were NOT present in the active profile's rule set. The CLI
+	// emits one stderr warning per entry: "unknown audit rule '<id>'"
+	// BEFORE rendering the markdown report. Mirrors the
+	// refactorvo.ScanRefactorsOutput.UnknownTypes pattern from EP03US-004.
+	//
+	// Empty when no config file exists, when audit.disabled_rules is
+	// empty, or when every disabled ID matched a real rule.
+	UnknownDisabledRules []string
 }
 
 // AuditModuleReport is the per-module section header data. Renderer emits

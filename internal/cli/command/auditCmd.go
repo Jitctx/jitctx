@@ -54,6 +54,10 @@ func NewAuditCmd(uc audituc.UseCase, _ *slog.Logger) *cobra.Command {
 			if err != nil {
 				return format.TranslateError(err)
 			}
+			// Emit one stderr warning per unknown disabled rule ID BEFORE the markdown report.
+			for _, id := range out.UnknownDisabledRules {
+				fmt.Fprintf(cmd.ErrOrStderr(), "unknown audit rule '%s'\n", id)
+			}
 			return format.WriteAuditReport(cmd.OutOrStdout(), out)
 		},
 	}

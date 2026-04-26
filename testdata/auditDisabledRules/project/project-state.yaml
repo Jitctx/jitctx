@@ -1,0 +1,21 @@
+generated_at: 2026-04-25T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: user
+    path: src/main/java/com/app/user
+    tags: []
+    contracts:
+      - name: User
+        type: entity
+        path: src/main/java/com/app/user/domain/User.java
+        methods: []
+      - name: UserRestController
+        type: rest-adapter
+        path: src/main/java/com/app/user/adapter/in/web/UserRestController.java
+        methods: []
+    dependencies: []
+contexts: []

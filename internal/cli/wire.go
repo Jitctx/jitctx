@@ -23,6 +23,7 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/usecase/refactoruc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/scaffolduc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/scanuc"
+	"github.com/jitctx/jitctx/internal/infrastructure/fsconfig"
 	"github.com/jitctx/jitctx/internal/infrastructure/fscontext"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsmanifest"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
@@ -95,6 +96,9 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	auditRulesLoader := fsprofile.NewAuditRulesLoader(cfg.ProfilesDir, logger)
 	auditEvaluator := domspecsvc.NewAuditEvaluator()
 
+	jitctxConfigLoader := fsconfig.New(logger)
+	auditFilter := domspecsvc.NewAuditRuleFilter()
+
 	layerer := domspecsvc.NewDependencyLayerer()
 	differ := domspecsvc.NewContractDiffer(domspecsvc.NewSignatureNormalizer())
 
@@ -134,12 +138,14 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			logger,
 		),
 		Audit: appaudituc.New(
-			manifestStore,    // manifest.LoadManifestPort
-			profileDetector,  // profile.DetectProfilePort
-			auditRulesLoader, // profile.LoadAuditRulesPort
-			tsWalker,         // parser.WalkJavaFilesPort
-			tsParser,         // parser.ParseJavaFilePort
-			tsParser,         // parser.ListJavaFieldsPort (same *Parser satisfies both)
+			manifestStore,      // manifest.LoadManifestPort
+			profileDetector,    // profile.DetectProfilePort
+			auditRulesLoader,   // profile.LoadAuditRulesPort
+			tsWalker,           // parser.WalkJavaFilesPort
+			tsParser,           // parser.ParseJavaFilePort
+			tsParser,           // parser.ListJavaFieldsPort (same *Parser satisfies both)
+			jitctxConfigLoader, // config.LoadJitctxConfigPort (EP03US-005)
+			auditFilter,        // *service.AuditRuleFilter (EP03US-005)
 			auditEvaluator,
 			logger,
 		),

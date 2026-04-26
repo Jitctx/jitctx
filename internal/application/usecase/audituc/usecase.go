@@ -12,6 +12,7 @@ import (
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
 	"github.com/jitctx/jitctx/internal/domain/model"
+	"github.com/jitctx/jitctx/internal/domain/port/config"
 	"github.com/jitctx/jitctx/internal/domain/port/manifest"
 	"github.com/jitctx/jitctx/internal/domain/port/parser"
 	"github.com/jitctx/jitctx/internal/domain/port/profile"
@@ -27,6 +28,8 @@ type Impl struct {
 	walker     parser.WalkJavaFilesPort
 	parseFile  parser.ParseJavaFilePort
 	listFields parser.ListJavaFieldsPort
+	config     config.LoadJitctxConfigPort // EP03US-005
+	filter     *service.AuditRuleFilter    // EP03US-005
 	evaluator  *service.AuditEvaluator
 	logger     *slog.Logger
 }
@@ -40,6 +43,8 @@ func New(
 	walker parser.WalkJavaFilesPort,
 	parseFile parser.ParseJavaFilePort,
 	listFields parser.ListJavaFieldsPort,
+	cfg config.LoadJitctxConfigPort, // EP03US-005
+	filter *service.AuditRuleFilter, // EP03US-005
 	evaluator *service.AuditEvaluator,
 	logger *slog.Logger,
 ) *Impl {
@@ -50,6 +55,8 @@ func New(
 		walker:     walker,
 		parseFile:  parseFile,
 		listFields: listFields,
+		config:     cfg,
+		filter:     filter,
 		evaluator:  evaluator,
 		logger:     logger,
 	}
@@ -64,6 +71,8 @@ func New(
 //  3. Build fs.FS for source-file reads (read-only).
 //  4. Detect the active profile (mirrors scanuc pattern).
 //  5. Load audit rules from the active profile; empty rules → clean report.
+//     5a. Load .jitctx/config.yaml (EP03US-005); missing file → empty config.
+//     5b. Filter disabled rules; stash unknown IDs for the output (EP03US-005).
 //  6. Walk Java files via WalkJavaFilesPort.
 //  7. For each file: parse via ParseJavaFilePort; on ErrPartialParse skip
 //     silently (mirrors scanuc tolerance).
@@ -112,6 +121,19 @@ func (u *Impl) Execute(ctx context.Context, in auditvo.AuditProjectInput) (audit
 		return auditvo.AuditProjectOutput{}, fmt.Errorf("audit: load rules: %w", err)
 	}
 
+	// Step 5a (EP03US-005): load .jitctx/config.yaml. Missing file → empty config.
+	cfg, err := u.config.LoadJitctxConfig(ctx, in.WorkDir)
+	if err != nil {
+		return auditvo.AuditProjectOutput{}, fmt.Errorf("audit: load config: %w", err)
+	}
+
+	// Step 5b (EP03US-005): filter disabled rules. unknown is forwarded to the
+	// presentation layer via AuditProjectOutput.UnknownDisabledRules so the
+	// CLI can emit one stderr line per entry. Disabling by ID is silent in
+	// the report (scenario 1) — the warning targets the developer's config
+	// file, not the audit report itself.
+	filteredRules, unknownDisabled := u.filter.Filter(rules, cfg.Audit.DisabledRules)
+
 	// Step 6: walk Java files.
 	paths, err := u.walker.WalkJavaFiles(ctx, fsys)
 	if err != nil {
@@ -134,7 +156,7 @@ func (u *Impl) Execute(ctx context.Context, in auditvo.AuditProjectInput) (audit
 			return auditvo.AuditProjectOutput{}, fmt.Errorf("audit: parse %s: %w", p, parseErr)
 		}
 		moduleID := moduleByPath(p)
-		violations = append(violations, u.evaluator.EvaluateFile(moduleID, summary, rules)...)
+		violations = append(violations, u.evaluator.EvaluateFile(moduleID, summary, filteredRules)...)
 	}
 
 	// Step 10: sort violations deterministically (RNF-003).
@@ -146,11 +168,12 @@ func (u *Impl) Execute(ctx context.Context, in auditvo.AuditProjectInput) (audit
 	mods := buildModuleReports(state.Modules, violations)
 
 	return auditvo.AuditProjectOutput{
-		ProfileName:         prof.Name,
-		ManifestPath:        in.ManifestPath,
-		Modules:             mods,
-		Sintatic:            violations,
-		SemanticPlaceholder: auditvo.SemanticPlaceholder,
+		ProfileName:          prof.Name,
+		ManifestPath:         in.ManifestPath,
+		Modules:              mods,
+		Sintatic:             violations,
+		SemanticPlaceholder:  auditvo.SemanticPlaceholder,
+		UnknownDisabledRules: unknownDisabled, // EP03US-005
 	}, nil
 }
 

@@ -15,6 +15,7 @@ import (
 	appaudituc "github.com/jitctx/jitctx/internal/application/usecase/audituc"
 	"github.com/jitctx/jitctx/internal/cli/command"
 	"github.com/jitctx/jitctx/internal/domain/service"
+	"github.com/jitctx/jitctx/internal/infrastructure/fsconfig"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsmanifest"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
 	"github.com/jitctx/jitctx/internal/infrastructure/treesitter"
@@ -35,6 +36,8 @@ func newAuditCmdFor(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, 
 	tsParser := treesitter.New()
 	tsWalker := treesitter.NewWalker()
 	evaluator := service.NewAuditEvaluator()
+	configLoader := fsconfig.New(logger)
+	auditFilter := service.NewAuditRuleFilter()
 
 	uc := appaudituc.New(
 		manifestStore,
@@ -43,6 +46,8 @@ func newAuditCmdFor(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, 
 		tsWalker,
 		tsParser,
 		tsParser,
+		configLoader,
+		auditFilter,
 		evaluator,
 		logger,
 	)
@@ -213,4 +218,158 @@ func TestAuditCmd_Integration_ManifestMissing(t *testing.T) {
 
 	require.Empty(t, stdout.String(),
 		"stdout must be empty when the manifest is missing")
+}
+
+// ─── auditDisabledRules — scenario 1: disabled rule golden match ──────────────
+
+// TestAuditCmd_Integration_DisabledRule_GoldenMatch copies the auditDisabledRules
+// fixture (which has config.yaml disabling domain-leak) into a tempdir, runs
+// `jitctx audit`, and asserts:
+//  1. The command returns no error.
+//  2. stdout matches the expected/report.md golden byte-for-byte — the disabled
+//     rule's violations are absent; only the other rule's violations appear.
+//  3. stderr is empty (no unknown-rule warnings expected).
+//
+// Covers EP03US-005 scenario 1 (disabled rule silently dropped from report).
+func TestAuditCmd_Integration_DisabledRule_GoldenMatch(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	copyFixture(t, fixtureDir(t, "auditDisabledRules", "project"), workDir)
+
+	manifestPath := filepath.Join(workDir, "project-state.yaml")
+	stdout, stderr, run := newAuditCmdFor(t, workDir, manifestPath)
+
+	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
+
+	expectedPath := fixtureDir(t, "auditDisabledRules", "expected", "report.md")
+	expected, err := os.ReadFile(expectedPath)
+	require.NoError(t, err)
+
+	require.Equal(t, string(expected), stdout.String(),
+		"disabled rule violations must be absent from the audit report (scenario 1)")
+	require.Empty(t, stderr.String(),
+		"stderr must be empty when all disabled rules are known (no unknown-rule warnings)")
+}
+
+// ─── auditDisabledRules — scenario 2: unknown disabled rule warns on stderr ───
+
+// TestAuditCmd_Integration_UnknownDisabledRule_StderrWarning copies the
+// auditDisabledRules fixture but overwrites .jitctx/config.yaml with a rule ID
+// that does not exist in the active profile. It asserts:
+//  1. The command returns no error (unknown rule is a warning, not a failure).
+//  2. stderr contains the exact line: unknown audit rule 'made-up-rule'
+//  3. stdout contains ALL violations from the fixture (nothing was actually
+//     disabled since the unknown rule matched nothing).
+//
+// Covers EP03US-005 scenario 2 (unknown disabled ID warns but does not fail).
+func TestAuditCmd_Integration_UnknownDisabledRule_StderrWarning(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	copyFixture(t, fixtureDir(t, "auditDisabledRules", "project"), workDir)
+
+	// Overwrite the config with an unknown rule ID so nothing is actually disabled.
+	configPath := filepath.Join(workDir, ".jitctx", "config.yaml")
+	unknownConfig := "audit:\n  disabled_rules:\n    - made-up-rule\n"
+	require.NoError(t, os.WriteFile(configPath, []byte(unknownConfig), 0o644))
+
+	manifestPath := filepath.Join(workDir, "project-state.yaml")
+	stdout, stderr, run := newAuditCmdFor(t, workDir, manifestPath)
+
+	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath),
+		"unknown disabled rule must not cause the audit to fail")
+
+	require.Contains(t, stderr.String(), "unknown audit rule 'made-up-rule'\n",
+		"stderr must contain the warning for the unknown disabled rule ID")
+
+	// With no real rule disabled, the report must contain ALL violations from
+	// the fixture (both domain-leak and entity-path-mismatch).
+	require.Contains(t, stdout.String(), "[domain-leak]",
+		"domain-leak violation must appear when the rule was not actually disabled")
+	require.Contains(t, stdout.String(), "[entity-path-mismatch]",
+		"entity-path-mismatch violation must appear in the full report")
+}
+
+// ─── scenario 3: no config file behaves as default ───────────────────────────
+
+// TestAuditCmd_Integration_NoConfig_BehavesAsDefault copies the auditViolations
+// fixture (which has no .jitctx/config.yaml) and runs the audit through the
+// updated pipeline (config loader present). It asserts:
+//  1. The command returns no error.
+//  2. stdout matches auditViolations/expected/report.md byte-for-byte — all
+//     violations present, nothing suppressed.
+//  3. stderr is empty.
+//
+// Covers EP03US-005 scenario 3 (missing config = empty disabled list = no-op
+// filter = backward compatible output).
+func TestAuditCmd_Integration_NoConfig_BehavesAsDefault(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	copyFixture(t, fixtureDir(t, "auditViolations", "project"), workDir)
+
+	manifestPath := filepath.Join(workDir, "project-state.yaml")
+	stdout, stderr, run := newAuditCmdFor(t, workDir, manifestPath)
+
+	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
+
+	expectedPath := fixtureDir(t, "auditViolations", "expected", "report.md")
+	expected, err := os.ReadFile(expectedPath)
+	require.NoError(t, err)
+
+	require.Equal(t, string(expected), stdout.String(),
+		"absent config must produce the same report as if no rules were disabled (scenario 3)")
+	require.Empty(t, stderr.String(),
+		"stderr must be empty when no config file exists")
+}
+
+// ─── RNF-002: read-only guarantee for auditDisabledRules fixture ─────────────
+
+// TestAuditCmd_Integration_ReadOnly_DisabledRules SHA-256s every file in the
+// auditDisabledRules project tree before and after running `jitctx audit`, then
+// asserts all hashes are unchanged (RNF-002: audit must never modify any file).
+func TestAuditCmd_Integration_ReadOnly_DisabledRules(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	copyFixture(t, fixtureDir(t, "auditDisabledRules", "project"), workDir)
+	manifestPath := filepath.Join(workDir, "project-state.yaml")
+
+	// hashAllFiles SHA-256s every file under workDir (including config and profiles).
+	hashAllFiles := func() map[string][sha256.Size]byte {
+		t.Helper()
+		hashes := make(map[string][sha256.Size]byte)
+		err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, walkErr error) error {
+			require.NoError(t, walkErr)
+			if d.IsDir() {
+				return nil
+			}
+			f, err := os.Open(path)
+			require.NoError(t, err)
+			defer f.Close()
+
+			h := sha256.New()
+			_, err = io.Copy(h, f)
+			require.NoError(t, err)
+
+			var sum [sha256.Size]byte
+			copy(sum[:], h.Sum(nil))
+			hashes[path] = sum
+			return nil
+		})
+		require.NoError(t, err)
+		return hashes
+	}
+
+	before := hashAllFiles()
+	require.NotEmpty(t, before, "fixture must contain at least one file")
+
+	_, _, run := newAuditCmdFor(t, workDir, manifestPath)
+	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
+
+	after := hashAllFiles()
+
+	require.Equal(t, before, after,
+		"audit must not modify any file in the project tree (RNF-002 read-only guarantee)")
 }
