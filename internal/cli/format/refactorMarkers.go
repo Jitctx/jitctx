@@ -70,9 +70,15 @@ func WriteRefactorMarkersReport(w io.Writer, out refactorvo.ScanRefactorsOutput)
 			trailing = m.OriginalText
 		}
 
-		// Marker bullet: - <type> — `<filepath>:<line>` — <description-or-original>
-		if _, err := fmt.Fprintf(w, "- %s — `%s:%d` — %s\n",
-			string(m.Type), m.FilePath, m.Line, trailing); err != nil {
+		// Append stale suffix when the marker has been flagged as a stale candidate.
+		staleSuffix := ""
+		if m.Stale {
+			staleSuffix = " (stale candidate)"
+		}
+
+		// Marker bullet: - <type> — `<filepath>:<line>` — <description-or-original>[stale]
+		if _, err := fmt.Fprintf(w, "- %s — `%s:%d` — %s%s\n",
+			string(m.Type), m.FilePath, m.Line, trailing, staleSuffix); err != nil {
 			return err
 		}
 	}

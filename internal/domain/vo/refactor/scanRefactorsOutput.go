@@ -19,4 +19,12 @@ type ScanRefactorsOutput struct {
 	// When false, the CLI may emit an info-level note that module
 	// resolution is unavailable. Markers still flow under "<unmoduled>".
 	ManifestPresent bool
+
+	// StaleSkipped is true when stale-detection was skipped because
+	// `.git` was absent or the `git` binary was not on PATH (EP03RF-009).
+	// The CLI emits the verbatim stderr line
+	//     git not detected, stale flag skipped
+	// exactly once when this is true. When true, every marker in
+	// Markers has Stale=false.
+	StaleSkipped bool
 }

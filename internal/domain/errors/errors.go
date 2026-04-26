@@ -165,6 +165,9 @@ var (
 	ErrAuditProfileMissing = errors.New("active profile has no audit rules")
 )
 
+// EP03US-006 sentinels
+var ErrGitUnavailable = errors.New("git not available")
+
 // AuditUnknownRuleKindError is raised when a profile YAML declares a rule
 // kind the running jitctx binary does not know about. Surfaced as a
 // warning by the use case (logged to stderr, rule skipped); never fails

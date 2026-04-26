@@ -72,6 +72,11 @@ func NewScanCmd(factory ScanUseCaseFactory, refactor refactoruc.UseCase, _ *slog
 				if err != nil {
 					return format.TranslateError(err)
 				}
+				// Emit a one-shot stderr note when stale detection was skipped (EP03US-006).
+				// This comes BEFORE the per-type unknown-marker warnings.
+				if out.StaleSkipped {
+					fmt.Fprintln(cmd.ErrOrStderr(), "git not detected, stale flag skipped")
+				}
 				// Emit one stderr warning per unknown marker type BEFORE the markdown report.
 				// --output/-o is intentionally ignored on this branch: markdown is the only
 				// supported format per EP03RF-007. No warning is emitted for -o combinations

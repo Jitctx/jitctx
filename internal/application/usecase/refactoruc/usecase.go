@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
+	gitport "github.com/jitctx/jitctx/internal/domain/port/git"
 	"github.com/jitctx/jitctx/internal/domain/port/manifest"
 	"github.com/jitctx/jitctx/internal/domain/port/parser"
 	"github.com/jitctx/jitctx/internal/domain/service"
@@ -19,11 +20,13 @@ import (
 // Impl satisfies refactoruc.UseCase.
 // Read-only by construction: zero writer ports (RNF-002).
 type Impl struct {
-	manifests   manifest.LoadManifestPort
-	walker      parser.WalkJavaFilesPort
-	comments    parser.ListJavaCommentsPort
-	markerParse *service.MarkerParser
-	logger      *slog.Logger
+	manifests    manifest.LoadManifestPort
+	walker       parser.WalkJavaFilesPort
+	comments     parser.ListJavaCommentsPort
+	gitFileMTime gitport.FileLastModifiedTimePort
+	gitLineMTime gitport.LineIntroducedTimePort
+	markerParse  *service.MarkerParser
+	logger       *slog.Logger
 }
 
 // New creates a new refactoruc.Impl with all required ports injected.
@@ -32,15 +35,19 @@ func New(
 	manifests manifest.LoadManifestPort,
 	walker parser.WalkJavaFilesPort,
 	comments parser.ListJavaCommentsPort,
+	gitFileMTime gitport.FileLastModifiedTimePort,
+	gitLineMTime gitport.LineIntroducedTimePort,
 	markerParse *service.MarkerParser,
 	logger *slog.Logger,
 ) *Impl {
 	return &Impl{
-		manifests:   manifests,
-		walker:      walker,
-		comments:    comments,
-		markerParse: markerParse,
-		logger:      logger,
+		manifests:    manifests,
+		walker:       walker,
+		comments:     comments,
+		gitFileMTime: gitFileMTime,
+		gitLineMTime: gitLineMTime,
+		markerParse:  markerParse,
+		logger:       logger,
 	}
 }
 
@@ -59,6 +66,11 @@ func New(
 //     service.ResolveModuleByPath.
 //  7. Sort markers by (ModuleID, FilePath, Line, Type, Description) with
 //     "<unmoduled>" last (RNF-003).
+//     7a. Stale detection: probe git availability via the file-mtime port on
+//     the first marker's path; if ErrGitUnavailable, set StaleSkipped=true
+//     and skip per-marker loop. Otherwise iterate every marker and set
+//     Stale=true when fileMTime is after lineMTime. Per-marker errors are
+//     non-fatal (log debug, leave Stale=false).
 //  8. Dedupe and sort UnknownTypes for deterministic stderr emission.
 //  9. Return ScanRefactorsOutput.
 func (u *Impl) Execute(ctx context.Context, in refactorvo.ScanRefactorsInput) (refactorvo.ScanRefactorsOutput, error) {
@@ -149,6 +161,47 @@ func (u *Impl) Execute(ctx context.Context, in refactorvo.ScanRefactorsInput) (r
 		return lessMarker(markers[i], markers[j])
 	})
 
+	// Step 7a: stale detection (EP03RF-009).
+	// Resolve absolute repoRoot for git invocations.
+	staleSkipped := false
+	repoRoot := in.WorkDir
+	if repoRoot == "" || repoRoot == "." {
+		if cwd, err := os.Getwd(); err == nil {
+			repoRoot = cwd
+		}
+	}
+
+	if len(markers) > 0 {
+		// Probe git availability using the first marker's file path.
+		_, probeErr := u.gitFileMTime.Get(ctx, repoRoot, markers[0].FilePath)
+		if errors.Is(probeErr, domerr.ErrGitUnavailable) {
+			staleSkipped = true
+			u.logger.Info("scan refactors: git not available; stale detection skipped")
+		} else {
+			// Per-marker stale detection; per-marker errors are non-fatal.
+			for i := range markers {
+				if err := ctx.Err(); err != nil {
+					return refactorvo.ScanRefactorsOutput{}, err
+				}
+				fileMT, ferr := u.gitFileMTime.Get(ctx, repoRoot, markers[i].FilePath)
+				if ferr != nil {
+					u.logger.Debug("scan refactors: file mtime unavailable",
+						"path", markers[i].FilePath, "err", ferr)
+					continue
+				}
+				lineMT, lerr := u.gitLineMTime.Get(ctx, repoRoot, markers[i].FilePath, markers[i].Line)
+				if lerr != nil {
+					u.logger.Debug("scan refactors: line mtime unavailable",
+						"path", markers[i].FilePath, "line", markers[i].Line, "err", lerr)
+					continue
+				}
+				if fileMT.After(lineMT) {
+					markers[i].Stale = true
+				}
+			}
+		}
+	}
+
 	// Step 8: build deduped, sorted unknownTypes slice.
 	unknownTypes := make([]string, 0, len(unknownTypeSet))
 	for k := range unknownTypeSet {
@@ -160,6 +213,7 @@ func (u *Impl) Execute(ctx context.Context, in refactorvo.ScanRefactorsInput) (r
 		Markers:         markers,
 		UnknownTypes:    unknownTypes,
 		ManifestPresent: manifestPresent,
+		StaleSkipped:    staleSkipped,
 	}, nil
 }
 

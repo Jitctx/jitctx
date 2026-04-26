@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -48,6 +49,32 @@ func (f *fakeListJavaCommentsPort) ListJavaComments(ctx context.Context, fsys fs
 	return f.list(ctx, fsys, path)
 }
 
+// fakeFileMTimePort is a fake for gitport.FileLastModifiedTimePort.
+// The get field is called on every invocation; if nil, returns ErrGitUnavailable.
+type fakeFileMTimePort struct {
+	get func(ctx context.Context, repoRoot, filePath string) (time.Time, error)
+}
+
+func (f *fakeFileMTimePort) Get(ctx context.Context, repoRoot, filePath string) (time.Time, error) {
+	if f.get == nil {
+		return time.Time{}, domerr.ErrGitUnavailable
+	}
+	return f.get(ctx, repoRoot, filePath)
+}
+
+// fakeLineMTimePort is a fake for gitport.LineIntroducedTimePort.
+// The get field is called on every invocation; if nil, returns ErrGitUnavailable.
+type fakeLineMTimePort struct {
+	get func(ctx context.Context, repoRoot, filePath string, line int) (time.Time, error)
+}
+
+func (f *fakeLineMTimePort) Get(ctx context.Context, repoRoot, filePath string, line int) (time.Time, error) {
+	if f.get == nil {
+		return time.Time{}, domerr.ErrGitUnavailable
+	}
+	return f.get(ctx, repoRoot, filePath, line)
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -56,15 +83,45 @@ func nopLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// defaultGitUnavailableFakes returns fakes that always report git as unavailable.
+// Used by buildUC so that all pre-existing tests see StaleSkipped=true and
+// Stale=false on every marker — no behavioural regression.
+func defaultGitUnavailableFakes() (*fakeFileMTimePort, *fakeLineMTimePort) {
+	return &fakeFileMTimePort{}, &fakeLineMTimePort{}
+}
+
 func buildUC(
 	loadFn func(context.Context) (*model.ProjectState, error),
 	walkFn func(context.Context, fs.FS) ([]string, error),
 	listFn func(context.Context, fs.FS, string) ([]parser.JavaComment, error),
 ) *apprefactoruc.Impl {
+	fileMTime, lineMTime := defaultGitUnavailableFakes()
 	return apprefactoruc.New(
 		&fakeLoadManifestPort{load: loadFn},
 		&fakeWalkJavaFilesPort{walk: walkFn},
 		&fakeListJavaCommentsPort{list: listFn},
+		fileMTime,
+		lineMTime,
+		service.NewMarkerParser(),
+		nopLogger(),
+	)
+}
+
+// buildUCWithGit is like buildUC but accepts explicit git port fakes.
+// Used by tests that exercise stale detection behaviour.
+func buildUCWithGit(
+	loadFn func(context.Context) (*model.ProjectState, error),
+	walkFn func(context.Context, fs.FS) ([]string, error),
+	listFn func(context.Context, fs.FS, string) ([]parser.JavaComment, error),
+	fileMTime *fakeFileMTimePort,
+	lineMTime *fakeLineMTimePort,
+) *apprefactoruc.Impl {
+	return apprefactoruc.New(
+		&fakeLoadManifestPort{load: loadFn},
+		&fakeWalkJavaFilesPort{walk: walkFn},
+		&fakeListJavaCommentsPort{list: listFn},
+		fileMTime,
+		lineMTime,
 		service.NewMarkerParser(),
 		nopLogger(),
 	)
@@ -96,7 +153,7 @@ func defaultInput(t *testing.T) refactorvo.ScanRefactorsInput {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Pre-existing tests (updated to pass default-unavailable git fakes via buildUC)
 // ---------------------------------------------------------------------------
 
 // TestRefactorUC_HappyPath: manifest with one module, walker returns one Java
@@ -435,4 +492,230 @@ func TestRefactorUC_Determinism(t *testing.T) {
 
 	require.Equal(t, out1, out2,
 		"two consecutive Execute calls with identical fakes must return deeply equal output")
+}
+
+// ---------------------------------------------------------------------------
+// New stale-detection tests (EP03RF-009 / EP03US-006)
+// ---------------------------------------------------------------------------
+
+// TestRefactorUC_StaleSkipped: both git ports return ErrGitUnavailable →
+// StaleSkipped is true and every marker has Stale=false.
+func TestRefactorUC_StaleSkipped(t *testing.T) {
+	t.Parallel()
+
+	const filePath = "src/main/java/com/app/BillingService.java"
+
+	fileMTime := &fakeFileMTimePort{} // nil get → ErrGitUnavailable
+	lineMTime := &fakeLineMTimePort{} // nil get → ErrGitUnavailable
+
+	uc := buildUCWithGit(
+		func(_ context.Context) (*model.ProjectState, error) {
+			return &model.ProjectState{}, nil
+		},
+		func(_ context.Context, _ fs.FS) ([]string, error) {
+			return []string{filePath}, nil
+		},
+		func(_ context.Context, _ fs.FS, _ string) ([]parser.JavaComment, error) {
+			return []parser.JavaComment{
+				lineComment(5, "// TODO(jitctx): rename - rename processPayment"),
+			}, nil
+		},
+		fileMTime,
+		lineMTime,
+	)
+
+	out, err := uc.Execute(context.Background(), defaultInput(t))
+	require.NoError(t, err)
+
+	require.True(t, out.StaleSkipped, "StaleSkipped must be true when git is unavailable")
+	require.Len(t, out.Markers, 1)
+	require.False(t, out.Markers[0].Stale, "Stale must be false when git is unavailable")
+}
+
+// TestRefactorUC_MarkerStale: file was modified after the marker line was
+// introduced → marker.Stale=true, StaleSkipped=false.
+// file mtime = 5 days ago (recent); line mtime = 30 days ago (old).
+func TestRefactorUC_MarkerStale(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC)
+	fileMTimeVal := now.Add(-5 * 24 * time.Hour)  // 5 days ago — file was recently modified
+	lineMTimeVal := now.Add(-30 * 24 * time.Hour) // 30 days ago — marker was written earlier
+
+	const filePath = "src/main/java/com/app/BillingService.java"
+
+	fileMTime := &fakeFileMTimePort{
+		get: func(_ context.Context, _, _ string) (time.Time, error) {
+			return fileMTimeVal, nil
+		},
+	}
+	lineMTime := &fakeLineMTimePort{
+		get: func(_ context.Context, _, _ string, _ int) (time.Time, error) {
+			return lineMTimeVal, nil
+		},
+	}
+
+	uc := buildUCWithGit(
+		func(_ context.Context) (*model.ProjectState, error) {
+			return &model.ProjectState{}, nil
+		},
+		func(_ context.Context, _ fs.FS) ([]string, error) {
+			return []string{filePath}, nil
+		},
+		func(_ context.Context, _ fs.FS, _ string) ([]parser.JavaComment, error) {
+			return []parser.JavaComment{
+				lineComment(10, "// TODO(jitctx): extract-method - extract payment logic"),
+			}, nil
+		},
+		fileMTime,
+		lineMTime,
+	)
+
+	out, err := uc.Execute(context.Background(), defaultInput(t))
+	require.NoError(t, err)
+
+	require.False(t, out.StaleSkipped, "StaleSkipped must be false when git is available")
+	require.Len(t, out.Markers, 1)
+	require.True(t, out.Markers[0].Stale,
+		"marker must be Stale when the file was modified after the marker line was introduced")
+}
+
+// TestRefactorUC_NotStale: file mtime equals line mtime → file was not modified
+// after the marker was added → marker.Stale=false, StaleSkipped=false.
+func TestRefactorUC_NotStale(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC)
+	sharedMTime := now.Add(-30 * 24 * time.Hour) // both file and line have the same mtime
+
+	const filePath = "src/main/java/com/app/UserService.java"
+
+	fileMTime := &fakeFileMTimePort{
+		get: func(_ context.Context, _, _ string) (time.Time, error) {
+			return sharedMTime, nil
+		},
+	}
+	lineMTime := &fakeLineMTimePort{
+		get: func(_ context.Context, _, _ string, _ int) (time.Time, error) {
+			return sharedMTime, nil
+		},
+	}
+
+	uc := buildUCWithGit(
+		func(_ context.Context) (*model.ProjectState, error) {
+			return &model.ProjectState{}, nil
+		},
+		func(_ context.Context, _ fs.FS) ([]string, error) {
+			return []string{filePath}, nil
+		},
+		func(_ context.Context, _ fs.FS, _ string) ([]parser.JavaComment, error) {
+			return []parser.JavaComment{
+				lineComment(7, "// TODO(jitctx): simplify - reduce complexity"),
+			}, nil
+		},
+		fileMTime,
+		lineMTime,
+	)
+
+	out, err := uc.Execute(context.Background(), defaultInput(t))
+	require.NoError(t, err)
+
+	require.False(t, out.StaleSkipped, "StaleSkipped must be false when git is available")
+	require.Len(t, out.Markers, 1)
+	require.False(t, out.Markers[0].Stale,
+		"marker must not be Stale when the file mtime equals the line mtime")
+}
+
+// TestRefactorUC_PerMarkerErrorTolerated: the line-mtime port returns a
+// non-ErrGitUnavailable error for one marker → use case logs at debug, leaves
+// Stale=false for that marker, does not return an error, and StaleSkipped=false.
+func TestRefactorUC_PerMarkerErrorTolerated(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC)
+	fileMTimeVal := now.Add(-5 * 24 * time.Hour)
+
+	const filePath = "src/main/java/com/app/InvoiceService.java"
+	perMarkerErr := errors.New("file not tracked")
+
+	fileMTime := &fakeFileMTimePort{
+		get: func(_ context.Context, _, _ string) (time.Time, error) {
+			return fileMTimeVal, nil
+		},
+	}
+	// line port returns a non-unavailability error — per-marker tolerated.
+	lineMTime := &fakeLineMTimePort{
+		get: func(_ context.Context, _, _ string, _ int) (time.Time, error) {
+			return time.Time{}, perMarkerErr
+		},
+	}
+
+	uc := buildUCWithGit(
+		func(_ context.Context) (*model.ProjectState, error) {
+			return &model.ProjectState{}, nil
+		},
+		func(_ context.Context, _ fs.FS) ([]string, error) {
+			return []string{filePath}, nil
+		},
+		func(_ context.Context, _ fs.FS, _ string) ([]parser.JavaComment, error) {
+			return []parser.JavaComment{
+				lineComment(12, "// TODO(jitctx): move - move to payments module"),
+			}, nil
+		},
+		fileMTime,
+		lineMTime,
+	)
+
+	out, err := uc.Execute(context.Background(), defaultInput(t))
+	require.NoError(t, err, "per-marker error must not abort the use case")
+
+	require.False(t, out.StaleSkipped, "StaleSkipped must be false — git IS available, only this marker failed")
+	require.Len(t, out.Markers, 1)
+	require.False(t, out.Markers[0].Stale,
+		"Stale must be false when the line-mtime query fails for that marker")
+}
+
+// TestRefactorUC_NoMarkersNoProbe: walker returns no files → zero markers →
+// git probe is skipped entirely, StaleSkipped remains false.
+func TestRefactorUC_NoMarkersNoProbe(t *testing.T) {
+	t.Parallel()
+
+	probeCallCount := 0
+
+	fileMTime := &fakeFileMTimePort{
+		get: func(_ context.Context, _, _ string) (time.Time, error) {
+			probeCallCount++
+			return time.Time{}, domerr.ErrGitUnavailable
+		},
+	}
+	lineMTime := &fakeLineMTimePort{
+		get: func(_ context.Context, _, _ string, _ int) (time.Time, error) {
+			probeCallCount++
+			return time.Time{}, domerr.ErrGitUnavailable
+		},
+	}
+
+	uc := buildUCWithGit(
+		func(_ context.Context) (*model.ProjectState, error) {
+			return &model.ProjectState{}, nil
+		},
+		// walker returns no files → no markers → no probe.
+		func(_ context.Context, _ fs.FS) ([]string, error) {
+			return []string{}, nil
+		},
+		func(_ context.Context, _ fs.FS, _ string) ([]parser.JavaComment, error) {
+			return nil, nil
+		},
+		fileMTime,
+		lineMTime,
+	)
+
+	out, err := uc.Execute(context.Background(), defaultInput(t))
+	require.NoError(t, err)
+
+	require.Empty(t, out.Markers, "no markers expected when walker returns no files")
+	require.False(t, out.StaleSkipped,
+		"StaleSkipped must be false when there are no markers (probe is skipped, per plan Q10)")
+	require.Equal(t, 0, probeCallCount,
+		"git ports must NOT be called when there are zero markers")
 }

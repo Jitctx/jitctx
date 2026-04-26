@@ -260,6 +260,91 @@ func TestWriteRefactorMarkersReport_Determinism(t *testing.T) {
 		"two WriteRefactorMarkersReport calls on identical input must produce byte-identical output")
 }
 
+// TestWriteRefactorMarkersReport_StaleTypedMarker verifies that a typed marker
+// with Stale=true appends " (stale candidate)" after the description in the bullet.
+func TestWriteRefactorMarkersReport_StaleTypedMarker(t *testing.T) {
+	t.Parallel()
+
+	marker := refactorvo.RefactorMarker{
+		ModuleID:    "billing",
+		FilePath:    "src/main/java/com/app/billing/BillingService.java",
+		Line:        42,
+		Type:        refactorvo.MarkerTypeRename,
+		Description: "rename foo to handleFoo",
+		Stale:       true,
+	}
+	out := refactorvo.ScanRefactorsOutput{
+		Markers: []refactorvo.RefactorMarker{marker},
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteRefactorMarkersReport(&buf, out)
+	require.NoError(t, err)
+
+	got := buf.String()
+
+	wantBullet := "- rename — `src/main/java/com/app/billing/BillingService.java:42` — rename foo to handleFoo (stale candidate)"
+	require.Contains(t, got, wantBullet)
+}
+
+// TestWriteRefactorMarkersReport_NoStaleWhenFalse verifies that a typed marker
+// with Stale=false does NOT append " (stale candidate)" to the bullet.
+func TestWriteRefactorMarkersReport_NoStaleWhenFalse(t *testing.T) {
+	t.Parallel()
+
+	marker := refactorvo.RefactorMarker{
+		ModuleID:    "billing",
+		FilePath:    "src/main/java/com/app/billing/BillingService.java",
+		Line:        42,
+		Type:        refactorvo.MarkerTypeRename,
+		Description: "rename foo to handleFoo",
+		Stale:       false,
+	}
+	out := refactorvo.ScanRefactorsOutput{
+		Markers: []refactorvo.RefactorMarker{marker},
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteRefactorMarkersReport(&buf, out)
+	require.NoError(t, err)
+
+	got := buf.String()
+
+	require.NotContains(t, got, "(stale candidate)")
+	wantBullet := "- rename — `src/main/java/com/app/billing/BillingService.java:42` — rename foo to handleFoo\n"
+	require.Contains(t, got, wantBullet)
+}
+
+// TestWriteRefactorMarkersReport_StaleUnparseableMarker verifies that an
+// unparseable marker with Stale=true renders OriginalText in the bullet AND
+// appends " (stale candidate)" as the suffix.
+func TestWriteRefactorMarkersReport_StaleUnparseableMarker(t *testing.T) {
+	t.Parallel()
+
+	marker := refactorvo.RefactorMarker{
+		ModuleID:     "user-management",
+		FilePath:     "src/main/java/com/app/UserService.java",
+		Line:         7,
+		Type:         refactorvo.MarkerTypeUnparseable,
+		Description:  "",
+		OriginalText: "// TODO(jitctx): missing separator here",
+		Stale:        true,
+	}
+	out := refactorvo.ScanRefactorsOutput{
+		Markers: []refactorvo.RefactorMarker{marker},
+	}
+
+	var buf bytes.Buffer
+	err := format.WriteRefactorMarkersReport(&buf, out)
+	require.NoError(t, err)
+
+	got := buf.String()
+
+	// Bullet must use OriginalText (not Description) AND end with the stale suffix.
+	wantBullet := "- unparseable — `src/main/java/com/app/UserService.java:7` — // TODO(jitctx): missing separator here (stale candidate)"
+	require.Contains(t, got, wantBullet)
+}
+
 // TestWriteRefactorMarkersReport_FullOutputStructure verifies the complete
 // output structure for a non-empty report: HTML comment header present,
 // top-level ## Refactor Markers heading present, and the order of sections.

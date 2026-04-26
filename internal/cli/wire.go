@@ -25,6 +25,7 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/usecase/scanuc"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsconfig"
 	"github.com/jitctx/jitctx/internal/infrastructure/fscontext"
+	"github.com/jitctx/jitctx/internal/infrastructure/fsgit"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsmanifest"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsscaffold"
@@ -149,13 +150,18 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			auditEvaluator,
 			logger,
 		),
-		Refactor: apprefactoruc.New(
-			manifestStore, // manifest.LoadManifestPort — same instance as audit/diff
-			tsWalker,      // parser.WalkJavaFilesPort — same instance as audit
-			tsParser,      // parser.ListJavaCommentsPort — same *Parser satisfies multiple ports
-			markerParser,
-			logger,
-		),
+		Refactor: func() refactoruc.UseCase {
+			gitReader := fsgit.New(logger)
+			return apprefactoruc.New(
+				manifestStore,          // manifest.LoadManifestPort — same instance as audit/diff
+				tsWalker,               // parser.WalkJavaFilesPort — same instance as audit
+				tsParser,               // parser.ListJavaCommentsPort — same *Parser satisfies multiple ports
+				gitReader,              // git.FileLastModifiedTimePort
+				gitReader.LineReader(), // git.LineIntroducedTimePort
+				markerParser,
+				logger,
+			)
+		}(),
 		WorkDir:  cfg.WorkDir,
 		PlansDir: cfg.PlansDir,
 		Logger:   logger,

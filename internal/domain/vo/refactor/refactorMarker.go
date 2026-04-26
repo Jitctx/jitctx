@@ -24,4 +24,11 @@ type RefactorMarker struct {
 	// OriginalText is the full comment text (including delimiters) for
 	// MarkerTypeUnparseable markers. Empty for all other types.
 	OriginalText string
+
+	// Stale is true when the marker's containing file has been modified
+	// in git history more recently than the marker's own line was last
+	// touched (EP03RF-009). Always false when git is unavailable
+	// (see ScanRefactorsOutput.StaleSkipped) or when per-marker git
+	// queries fail (e.g., file not tracked, line uncommitted).
+	Stale bool
 }
