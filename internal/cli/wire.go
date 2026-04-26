@@ -35,7 +35,16 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/treesitter"
 
 	domspecsvc "github.com/jitctx/jitctx/internal/domain/service"
+
+	profileport "github.com/jitctx/jitctx/internal/domain/port/profile"
 )
+
+// bundledProfiles composes the two ISP ports backed by *fsprofile.Bundled so
+// wiring code can hand the same struct to consumers expecting either port.
+type bundledProfiles interface {
+	profileport.LoadBundledProfilePort
+	profileport.ListBundledProfilesPort
+}
 
 type Deps struct {
 	ScanFactory command.ScanUseCaseFactory
@@ -50,6 +59,14 @@ type Deps struct {
 	WorkDir     string
 	PlansDir    string
 	Logger      *slog.Logger
+
+	// ProfileBundleLoader satisfies profile.LoadProfileBundlePort.
+	// Backed by *fsprofile.BundleLoader.
+	ProfileBundleLoader profileport.LoadProfileBundlePort
+
+	// BundledProfiles satisfies both profile.LoadBundledProfilePort and
+	// profile.ListBundledProfilesPort. Backed by *fsprofile.Bundled.
+	BundledProfiles bundledProfiles
 }
 
 func Wire(cfg config.Config, logger *slog.Logger) Deps {
@@ -104,6 +121,9 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	differ := domspecsvc.NewContractDiffer(domspecsvc.NewSignatureNormalizer())
 
 	markerParser := domspecsvc.NewMarkerParser()
+
+	profileBundleLoader := fsprofile.NewBundleLoader(logger)
+	bundled := fsprofile.NewBundled()
 
 	return Deps{
 		ScanFactory: scanFactory,
@@ -162,8 +182,10 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 				logger,
 			)
 		}(),
-		WorkDir:  cfg.WorkDir,
-		PlansDir: cfg.PlansDir,
-		Logger:   logger,
+		WorkDir:             cfg.WorkDir,
+		PlansDir:            cfg.PlansDir,
+		Logger:              logger,
+		ProfileBundleLoader: profileBundleLoader,
+		BundledProfiles:     bundled,
 	}
 }

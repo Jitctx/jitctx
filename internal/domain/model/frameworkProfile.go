@@ -12,8 +12,12 @@ type ProfileSource string
 
 const (
 	// ProfileSourceCustom marks a profile loaded from the user's profiles
-	// directory on disk. This is the only production-valid source.
+	// directory on disk. (Existing — not modified.)
 	ProfileSourceCustom ProfileSource = "custom"
+
+	// ProfileSourceBundled marks a profile loaded from the binary embed
+	// (//go:embed in fsprofile/bundled.go). Introduced by EP04US-001.
+	ProfileSourceBundled ProfileSource = "bundled"
 )
 
 type FrameworkProfile struct {

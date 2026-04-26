@@ -1,0 +1,5 @@
+name: spring-boot-hexagonal
+language: java
+types:
+  - id: service
+    template: service.java.tmpl

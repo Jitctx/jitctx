@@ -235,3 +235,44 @@ func (e *ScaffoldRenderError) Error() string {
 func (e *ScaffoldRenderError) Unwrap() error { return e.Cause }
 
 func (e *ScaffoldRenderError) Is(target error) bool { return target == ErrScaffoldRender }
+
+// EP04US-001 sentinels — appended at the bottom of the existing var blocks.
+var (
+	// ErrProfileYamlMissing is returned when a profile bundle directory
+	// does not contain a profile.yaml file. Its Error() string is the
+	// literal "profile.yaml not found" required by the .feature file.
+	ErrProfileYamlMissing = errors.New("profile.yaml not found")
+
+	// ErrTemplateMissing is returned when a profile.yaml declares a type
+	// whose template file is not present under templates/. Wraps
+	// ErrProfileInvalid for errors.Is matching.
+	ErrTemplateMissing = errors.New("profile template missing")
+
+	// ErrBundledProfileNotFound is returned when LoadBundledProfilePort
+	// is asked for a profile name that is not embedded in the binary.
+	ErrBundledProfileNotFound = errors.New("bundled profile not found")
+)
+
+// TemplateMissingError carries the profile name, the type ID, and the
+// missing template filename so the canonical user-facing message can be
+// reproduced by any consumer. The Error() string is the EP04US-001
+// pinned literal:
+//
+//	profile "spring-boot-hexagonal": type "service" references missing template "service.java.tmpl"
+//
+// errors.Is(err, ErrTemplateMissing) and errors.Is(err, ErrProfileInvalid)
+// both return true.
+type TemplateMissingError struct {
+	ProfileName string
+	TypeID      string
+	Template    string
+}
+
+func (e *TemplateMissingError) Error() string {
+	return fmt.Sprintf("profile %q: type %q references missing template %q",
+		e.ProfileName, e.TypeID, e.Template)
+}
+
+func (e *TemplateMissingError) Is(target error) bool {
+	return target == ErrTemplateMissing || errors.Is(target, ErrProfileInvalid)
+}

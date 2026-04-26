@@ -1,0 +1,5 @@
+name: spring-boot-hexagonal
+language: java
+# US-001 ships a bundle skeleton. The full type/classification/packaging
+# content lands with EP04US-002 and EP04US-004 (parity).
+types: []
