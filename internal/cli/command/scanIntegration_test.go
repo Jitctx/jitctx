@@ -22,11 +22,20 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/treesitter"
 )
 
-// buildScanFactoryWithLogger creates a factory that uses real adapters with a given logger.
+// buildScanFactoryWithLogger creates a ScanUseCaseFactory backed by fsprofile.NewResolver.
+// The profilesDir argument is the relative profiles directory (e.g. ".jitctx/profiles");
+// it is forwarded to appscanuc.New so the resolver can locate user-dir profiles at
+// <workDir>/<profilesDir>/<name>/. An empty string is allowed; it causes the resolver
+// to consult only the bundled embed for auto-detect paths.
 func buildScanFactoryWithLogger(profilesDir string, logger *slog.Logger) command.ScanUseCaseFactory {
+	resolver := fsprofile.NewResolver(
+		fsprofile.NewBundleLoader(logger),
+		fsprofile.NewBundled(),
+		logger,
+	)
 	return func(manifestPath string) scanuc.UseCase {
 		return appscanuc.New(
-			fsprofile.NewDetectorWithLogger(profilesDir, logger),
+			resolver,
 			domspecsvc.NewDeclarativeClassifier(),
 			treesitter.NewWalker(),
 			treesitter.New(),
@@ -34,6 +43,7 @@ func buildScanFactoryWithLogger(profilesDir string, logger *slog.Logger) command
 			fscontext.New(),
 			token.NewHeuristicEstimator(),
 			fsmanifest.New(manifestPath),
+			profilesDir,
 			logger,
 		)
 	}
@@ -46,8 +56,7 @@ func TestScanCmd_Integration_HappyPath(t *testing.T) {
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, discardLogger())
@@ -87,20 +96,24 @@ func TestScanCmd_Integration_NoProfile(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
-	// Only a README - no pom.xml or build.gradle.
+	// Only a README - no pom.xml or build.gradle, no user-dir profiles.
+	// The Resolver falls back to the bundled spring-boot-hexagonal profile
+	// (EP04RF-012 — bundled embed is always consulted last). The scan
+	// succeeds but produces no modules (no Java files to parse).
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# My Project"), 0o644))
 
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
+	// With the Resolver the bundled profile is always available; an empty project
+	// results in a valid (but empty) manifest rather than an error.
 	err := cmd.ExecuteContext(context.Background())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "no matching framework profile found")
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "scanned:")
 }
 
 func TestScanCmd_Integration_PartialParse(t *testing.T) {
@@ -113,8 +126,7 @@ func TestScanCmd_Integration_PartialParse(t *testing.T) {
 	var stderrBuf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&stderrBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	factory := buildScanFactoryWithLogger(profilesDir, logger)
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", logger)
 
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, logger)
@@ -135,11 +147,9 @@ func TestScanCmd_Integration_Deterministic(t *testing.T) {
 	workDir := t.TempDir()
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-
 	runScan := func() string {
 		manifestPath := filepath.Join(workDir, "project-state-det.yaml")
-		factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+		factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 		cmd := command.NewScanCmd(factory, nil, discardLogger())
 		cmd.SetOut(os.Stdout)
 		cmd.SetArgs([]string{"--path", workDir, "--manifest", manifestPath})
@@ -170,8 +180,7 @@ dependencies {
 }`
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "build.gradle"), []byte(gradleContent), 0o644))
 
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
@@ -183,16 +192,19 @@ dependencies {
 }
 
 // TestScanCmd_Integration_ProfileFlagSelectsByName verifies that --profile selects
-// a specific named profile from multiple custom profiles in .jitctx/profiles/.
+// a specific named user-dir profile when multiple profiles exist in .jitctx/profiles/.
+// The Resolver (EP04RF-012) tries the user-dir first for the explicit --profile name.
 func TestScanCmd_Integration_ProfileFlagSelectsByName(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
-	// copyFixture brings .jitctx/profiles/spring-boot-hexagonal.yaml into workDir.
+	// copyFixture brings the full spring-boot-hexagonal directory profile into workDir.
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
-	// Write an additional custom profile alongside the one from the fixture.
+	// Write an additional custom profile as a DIRECTORY alongside the one from the fixture.
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
+	mySpringDir := filepath.Join(profilesDir, "my-spring")
+	require.NoError(t, os.MkdirAll(mySpringDir, 0o755))
 
 	customProfile := `name: my-spring
 languages: [java]
@@ -215,9 +227,9 @@ rules:
       has_annotation: Entity
     classify_as: entity
 `
-	require.NoError(t, os.WriteFile(filepath.Join(profilesDir, "my-spring.yaml"), []byte(customProfile), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(mySpringDir, "profile.yaml"), []byte(customProfile), 0o644))
 
-	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
@@ -236,15 +248,14 @@ func TestScanCmd_Integration_ProfileLog(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
+	// copyFixture brings the directory-based spring-boot-hexagonal profile into workDir.
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
-
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
 
 	// Use a real logger writing to a buffer.
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	factory := buildScanFactoryWithLogger(profilesDir, logger)
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", logger)
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, logger)
 	cmd.SetOut(&stdout)
@@ -255,7 +266,8 @@ func TestScanCmd_Integration_ProfileLog(t *testing.T) {
 
 	// Gherkin feature line 175: log message must contain the exact substring.
 	require.Contains(t, logBuf.String(), "Profile: spring-boot-hexagonal")
-	// Structured attribute for source provenance — always custom after externalize-profiles chore.
+	// Source is "custom" because the user-dir profile is found at
+	// <workdir>/.jitctx/profiles/spring-boot-hexagonal/ (EP04RF-012).
 	require.Contains(t, logBuf.String(), "source=custom")
 }
 
@@ -278,8 +290,7 @@ dependencies {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	factory := buildScanFactoryWithLogger(profilesDir, logger)
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", logger)
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, logger)
 	cmd.SetOut(&stdout)
@@ -299,8 +310,7 @@ func TestScanCmd_Integration_ServiceByImplementsUseCase(t *testing.T) {
 	workDir := t.TempDir()
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(&stdout)
@@ -321,21 +331,23 @@ func TestScanCmd_Integration_ServiceByImplementsUseCase(t *testing.T) {
 }
 
 // TestScanCmd_Integration_MultipleCustomProfilesFirstWins verifies that when
-// multiple custom profiles match a project, the alphabetically first one wins.
+// multiple user-dir profiles exist, the alphabetically first one wins (EP04RF-012).
 func TestScanCmd_Integration_MultipleCustomProfilesFirstWins(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
-	// copyFixture brings .jitctx/profiles/spring-boot-hexagonal.yaml into workDir.
-	// "my-spring" sorts after "spring-boot-hexagonal" alphabetically, so
-	// spring-boot-hexagonal wins auto-detect. Write "my-spring.yaml" which also
-	// matches pom.xml — the detector picks the alphabetically-first match.
+	// copyFixture brings the spring-boot-hexagonal directory profile into workDir.
+	// "my-spring" sorts AFTER "spring-boot-hexagonal" alphabetically, so
+	// spring-boot-hexagonal wins the Resolver's auto-detect loop.
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
 
-	// Write an additional custom profile that also matches pom.xml.
-	// "my-spring" sorts AFTER "spring-boot-hexagonal", so spring-boot-hexagonal wins.
+	// Write an additional directory-based profile that also contains a valid
+	// profile.yaml. "my-spring" > "spring-boot-hexagonal" alphabetically — the
+	// Resolver returns the first alphabetical match (spring-boot-hexagonal).
+	mySpringDir := filepath.Join(profilesDir, "my-spring")
+	require.NoError(t, os.MkdirAll(mySpringDir, 0o755))
 	customProfile := `name: my-spring
 languages: [java]
 query_lang: java
@@ -357,29 +369,28 @@ rules:
       has_annotation: Entity
     classify_as: entity
 `
-	require.NoError(t, os.WriteFile(filepath.Join(profilesDir, "my-spring.yaml"), []byte(customProfile), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(mySpringDir, "profile.yaml"), []byte(customProfile), 0o644))
 
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	factory := buildScanFactoryWithLogger(profilesDir, logger)
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", logger)
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, logger)
 	cmd.SetOut(&stdout)
-	// Run WITHOUT --profile flag — detector auto-picks by alphabetical precedence.
+	// Run WITHOUT --profile flag — Resolver picks alphabetically first user-dir.
 	cmd.SetArgs([]string{"--path", workDir})
 
 	err := cmd.ExecuteContext(context.Background())
 	require.NoError(t, err)
 
-	// Both profiles are custom; the alphabetically-first matching profile is selected.
-	// source must always be "custom" — there is no bundled fallback.
+	// User-dir profile wins — source is always "custom".
 	require.Contains(t, logBuf.String(), "source=custom")
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
 	manifest, err := os.ReadFile(manifestPath)
 	require.NoError(t, err)
-	// The manifest must record whichever profile the detector selected.
+	// The manifest must record whichever profile the resolver selected.
 	require.True(t,
 		strings.Contains(string(manifest), "spring-boot-hexagonal") ||
 			strings.Contains(string(manifest), "my-spring"),
@@ -388,53 +399,52 @@ rules:
 }
 
 // TestScanCmd_Integration_MalformedCustomProfileIsSkipped verifies that when a
-// custom profile file is malformed, the detector warns and continues to the next
-// candidate. There is no bundled fallback — the scan succeeds via a valid custom
-// profile that also resides in .jitctx/profiles/.
+// user-dir profile cannot be loaded (missing or malformed profile.yaml), the
+// Resolver warns and continues to the next candidate (EP04RF-012).
 func TestScanCmd_Integration_MalformedCustomProfileIsSkipped(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
-	// copyFixture brings .jitctx/profiles/spring-boot-hexagonal.yaml into workDir.
+	// copyFixture brings the spring-boot-hexagonal directory profile into workDir.
 	copyFixture(t, fixtureDir(t, "springBootMinimal", "project"), workDir)
 
-	// Write a syntactically broken YAML alongside the valid spring-boot-hexagonal.yaml.
-	// "broken" sorts before "spring-boot-hexagonal" alphabetically, so the detector
-	// hits the malformed file first, warns, skips it, and then finds the valid profile.
+	// Create a "broken" directory (no profile.yaml inside) — "broken" sorts before
+	// "spring-boot-hexagonal" alphabetically, so the Resolver hits it first, logs a WARN,
+	// skips it, then successfully loads spring-boot-hexagonal.
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	brokenProfile := "name: bad\n  invalid: : :"
-	require.NoError(t, os.WriteFile(filepath.Join(profilesDir, "broken.yaml"), []byte(brokenProfile), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(profilesDir, "broken"), 0o755))
+	// Deliberately leave the directory empty (no profile.yaml) to trigger the skip.
 
 	var warnBuf bytes.Buffer
 	warnLogger := slog.New(slog.NewTextHandler(&warnBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	factory := buildScanFactoryWithLogger(profilesDir, warnLogger)
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", warnLogger)
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, warnLogger)
 	cmd.SetOut(&stdout)
 	cmd.SetArgs([]string{"--path", workDir})
 
-	// EP01RF-012 §Exceptions: scan must still succeed when a custom profile is malformed;
-	// the detector skips it and continues to the next candidate.
+	// EP04RF-012: scan must still succeed when a user-dir profile is unloadable;
+	// the Resolver skips it and continues to the next candidate.
 	err := cmd.ExecuteContext(context.Background())
 	require.NoError(t, err)
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
 	require.FileExists(t, manifestPath)
 
-	// Detector must log a warning for the malformed file.
-	require.Contains(t, warnBuf.String(), "custom profile parse error")
+	// Resolver logs a warning for the unloadable directory.
+	require.Contains(t, warnBuf.String(), "resolver: skipping malformed user-dir profile")
 
-	// Verify the scan selected the valid profile at info level.
+	// Verify the scan selected the valid spring-boot-hexagonal profile at info level.
 	var infoLogBuf bytes.Buffer
 	infoLogger := slog.New(slog.NewTextHandler(&infoLogBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	factory2 := buildScanFactoryWithLogger(profilesDir, infoLogger)
+	factory2 := buildScanFactoryWithLogger(".jitctx/profiles", infoLogger)
 	cmd2 := command.NewScanCmd(factory2, nil, infoLogger)
 	cmd2.SetOut(&stdout)
 	manifestPath2 := filepath.Join(workDir, "project-state-2.yaml")
 	cmd2.SetArgs([]string{"--path", workDir, "--manifest", manifestPath2})
 	require.NoError(t, cmd2.ExecuteContext(context.Background()))
-	// The valid spring-boot-hexagonal profile must be selected (source always custom).
+	// The valid spring-boot-hexagonal profile must be selected (source=custom — user-dir).
 	require.Contains(t, infoLogBuf.String(), "Profile: spring-boot-hexagonal")
 	require.Contains(t, infoLogBuf.String(), "source=custom")
 }
@@ -457,8 +467,7 @@ func TestScanCmd_Integration_MultiAnnotationClass(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(domainDir, "UserWithTableAnnotation.java"), data, 0o644))
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 
 	var stdout bytes.Buffer
 	cmd := command.NewScanCmd(factory, nil, discardLogger())
@@ -485,8 +494,7 @@ func TestScanCmd_Integration_ManifestTraversalRejected(t *testing.T) {
 
 	workDir := t.TempDir()
 
-	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	factory := buildScanFactoryWithLogger(profilesDir, discardLogger())
+	factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 
 	cmd := command.NewScanCmd(factory, nil, discardLogger())
 	cmd.SetOut(os.Stdout)

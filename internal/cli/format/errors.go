@@ -70,6 +70,25 @@ func TranslateError(err error) error {
 		return fmt.Errorf("module %q not found; available modules: %s",
 			mnf.Queried, strings.Join(mnf.AvailableSorted, ", "))
 	}
+	// EP04US-006 — profile init / resolver translations.
+	var pte *domerr.ProfileTargetExistsError
+	if errors.As(err, &pte) {
+		return fmt.Errorf(
+			"%s; remove it first or choose a different name", pte.Error())
+	}
+	var ubp *domerr.UnknownBundledProfileError
+	if errors.As(err, &ubp) {
+		if len(ubp.Available) == 0 {
+			return fmt.Errorf("unknown bundled profile %q; no bundled profiles available", ubp.Name)
+		}
+		return fmt.Errorf("unknown bundled profile %q; available: %s",
+			ubp.Name, strings.Join(ubp.Available, ", "))
+	}
+	// EP04US-006 sentinel — when the resolver cannot find the requested
+	// profile in either user dir or bundled.
+	if errors.Is(err, domerr.ErrProfileNotFound) {
+		return fmt.Errorf("profile not found: %w; ensure .jitctx/profiles/<name>/ exists or use a bundled profile", err)
+	}
 	switch {
 	case errors.Is(err, domerr.ErrModuleNotFound):
 		return fmt.Errorf("module not found in manifest")

@@ -18,12 +18,13 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/port/token"
 	"github.com/jitctx/jitctx/internal/domain/service"
 	"github.com/jitctx/jitctx/internal/domain/vo"
+	profilevo "github.com/jitctx/jitctx/internal/domain/vo/profile"
 	scanvo "github.com/jitctx/jitctx/internal/domain/vo/scan"
 )
 
 // Impl implements the scanuc.UseCase interface.
 type Impl struct {
-	profiles              profile.DetectProfilePort
+	resolver              profile.ResolveProfilePort
 	declarativeClassifier profile.ClassifyDeclarativePort
 	walker                parser.WalkJavaFilesPort
 	javaParse             parser.ParseJavaFilePort
@@ -31,12 +32,13 @@ type Impl struct {
 	ctxRead               ctxport.ReadContextBodyPort
 	estimator             token.EstimateTokensPort
 	manifest              manifest.SaveManifestPort
+	profilesDir           string
 	logger                *slog.Logger
 }
 
 // New creates a new scanuc.Impl with all required ports.
 func New(
-	profiles profile.DetectProfilePort,
+	resolver profile.ResolveProfilePort,
 	declarativeClassifier profile.ClassifyDeclarativePort,
 	walker parser.WalkJavaFilesPort,
 	javaParse parser.ParseJavaFilePort,
@@ -44,10 +46,11 @@ func New(
 	ctxRead ctxport.ReadContextBodyPort,
 	estimator token.EstimateTokensPort,
 	mani manifest.SaveManifestPort,
+	profilesDir string,
 	logger *slog.Logger,
 ) *Impl {
 	return &Impl{
-		profiles:              profiles,
+		resolver:              resolver,
 		declarativeClassifier: declarativeClassifier,
 		walker:                walker,
 		javaParse:             javaParse,
@@ -55,6 +58,7 @@ func New(
 		ctxRead:               ctxRead,
 		estimator:             estimator,
 		manifest:              mani,
+		profilesDir:           profilesDir,
 		logger:                logger,
 	}
 }
@@ -74,17 +78,16 @@ func (u *Impl) Execute(ctx context.Context, input scanvo.ScanProjectInput) (scan
 		fsys = os.DirFS(input.WorkDir)
 	}
 
-	// Step 3: Detect profile.
-	prof, err := u.profiles.Detect(ctx, fsys)
+	// Step 3: Resolve profile per EP04RF-012 cascade.
+	bundle, err := u.resolver.Resolve(ctx, profilevo.ResolveProfileInput{
+		Name:        input.ProfileName,
+		WorkDir:     input.WorkDir,
+		ProfilesDir: u.profilesDir,
+	})
 	if err != nil {
 		return scanvo.ScanProjectOutput{}, err
 	}
-
-	// Step 3 (continued): Validate requested profile name.
-	if input.ProfileName != "" && input.ProfileName != prof.Name {
-		return scanvo.ScanProjectOutput{}, fmt.Errorf("requested profile %q not matched: %w",
-			input.ProfileName, domerr.ErrNoProfileMatch)
-	}
+	prof := bundle.Profile
 
 	// Step 4: Log profile selected.
 	u.logger.Info(

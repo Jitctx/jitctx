@@ -25,9 +25,49 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte) (*model.ProfileB
 		langs = []string{lang}
 	}
 
+	// Map legacy EP-03 classification rules when present.
+	legacyRules := make([]model.ProfileRule, 0, len(dto.Rules))
+	for _, r := range dto.Rules {
+		if r.ClassifyAs == "" {
+			continue
+		}
+		legacyRules = append(legacyRules, model.ProfileRule{
+			Match: model.ProfileMatch{
+				NodeType:      r.Match.NodeType,
+				PathContains:  r.Match.PathContains,
+				HasAnnotation: r.Match.HasAnnotation,
+				Implements:    r.Match.Implements,
+			},
+			ClassifyAs: model.ContractType(r.ClassifyAs),
+		})
+	}
+
+	legacyFiles := make([]model.ProfileFileMatcher, 0, len(dto.Detect.Files))
+	for _, f := range dto.Detect.Files {
+		legacyFiles = append(legacyFiles, model.ProfileFileMatcher{
+			Name:     f.Name,
+			Contains: f.Contains,
+		})
+	}
+
+	legacyMarkers := make([]model.ModuleMarker, 0, len(dto.ModuleDetection.Markers))
+	for _, m := range dto.ModuleDetection.Markers {
+		legacyMarkers = append(legacyMarkers, model.ModuleMarker{Kind: m.Kind, Value: m.Value})
+	}
+
 	profile := &model.FrameworkProfile{
 		Name:      dto.Name,
 		Languages: langs,
+		QueryLang: dto.QueryLang,
+		Detect: model.ProfileDetect{
+			Files: legacyFiles,
+		},
+		ModuleDetection: model.ModuleDetection{
+			Strategy: dto.ModuleDetection.Strategy,
+			Roots:    dto.ModuleDetection.Roots,
+			Markers:  legacyMarkers,
+		},
+		Rules: legacyRules,
 	}
 
 	rawTypes := make([]model.ProfileTypeDeclaration, 0, len(dto.Types))

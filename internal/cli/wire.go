@@ -8,6 +8,7 @@ import (
 	appdiffuc "github.com/jitctx/jitctx/internal/application/usecase/diffuc"
 	appplannewuc "github.com/jitctx/jitctx/internal/application/usecase/plannewuc"
 	appplanuc "github.com/jitctx/jitctx/internal/application/usecase/planuc"
+	appprofileinituc "github.com/jitctx/jitctx/internal/application/usecase/profileinituc"
 	appqueryuc "github.com/jitctx/jitctx/internal/application/usecase/queryuc"
 	apprefactoruc "github.com/jitctx/jitctx/internal/application/usecase/refactoruc"
 	appscaffolduc "github.com/jitctx/jitctx/internal/application/usecase/scaffolduc"
@@ -19,6 +20,7 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/usecase/diffuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/plannewuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/planuc"
+	"github.com/jitctx/jitctx/internal/domain/usecase/profileinituc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/queryuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/refactoruc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/scaffolduc"
@@ -72,6 +74,24 @@ type Deps struct {
 	// Backed by *service.DeclarativeClassifier. Exposed so US-003 can
 	// inject it into scanuc.Impl without a second wire.go edit.
 	DeclarativeClassifier profileport.ClassifyDeclarativePort
+
+	// ProfilesDir is plumbed through so the profile init command can
+	// resolve <WorkDir>/<ProfilesDir>/<name>/ without re-reading
+	// config. Mirrors PlansDir/WorkDir convention.
+	ProfilesDir string
+
+	// ProfileResolver satisfies profile.ResolveProfilePort. Backed by
+	// *fsprofile.Resolver. Consumed by scanuc and by the profile init
+	// use case (for the existence check via list).
+	ProfileResolver profileport.ResolveProfilePort
+
+	// ProfileExtractor satisfies profile.ExtractBundledProfilePort.
+	// Backed by *fsprofile.Extractor. Consumed by the profile init use case.
+	ProfileExtractor profileport.ExtractBundledProfilePort
+
+	// InitProfile is the profile init use case. Consumed by the new
+	// "profile init" cobra subcommand.
+	InitProfile profileinituc.UseCase
 }
 
 func Wire(cfg config.Config, logger *slog.Logger) Deps {
@@ -86,10 +106,21 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	estimator := token.NewHeuristicEstimator()
 	declarativeClassifier := domspecsvc.NewDeclarativeClassifier()
 
+	profileBundleLoader := fsprofile.NewBundleLoader(logger)
+	bundled := fsprofile.NewBundled()
+	profileResolver := fsprofile.NewResolver(profileBundleLoader, bundled, logger)
+	profileExtractor := fsprofile.NewExtractor()
+
+	initProfileUC := appprofileinituc.New(
+		bundled,          // ListBundledProfilesPort (also satisfies LoadBundledProfilePort)
+		profileExtractor, // ExtractBundledProfilePort
+		logger,
+	)
+
 	scanFactory := func(manifestPath string) scanuc.UseCase {
 		store := fsmanifest.New(manifestPath)
 		return appscanuc.New(
-			profileDetector,
+			profileResolver, // CHANGED — was profileDetector
 			declarativeClassifier,
 			tsWalker,
 			tsParser,
@@ -97,6 +128,7 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			ctxDiscoverer,
 			estimator,
 			store,
+			cfg.ProfilesDir, // NEW — the resolver needs to know the profiles dir
 			logger,
 		)
 	}
@@ -128,9 +160,6 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	differ := domspecsvc.NewContractDiffer(domspecsvc.NewSignatureNormalizer())
 
 	markerParser := domspecsvc.NewMarkerParser()
-
-	profileBundleLoader := fsprofile.NewBundleLoader(logger)
-	bundled := fsprofile.NewBundled()
 
 	return Deps{
 		ScanFactory: scanFactory,
@@ -195,5 +224,9 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 		ProfileBundleLoader:   profileBundleLoader,
 		BundledProfiles:       bundled,
 		DeclarativeClassifier: declarativeClassifier,
+		ProfilesDir:           cfg.ProfilesDir,
+		ProfileResolver:       profileResolver,
+		ProfileExtractor:      profileExtractor,
+		InitProfile:           initProfileUC,
 	}
 }

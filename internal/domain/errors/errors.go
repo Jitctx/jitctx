@@ -296,3 +296,64 @@ func (e *TemplateMissingError) Error() string {
 func (e *TemplateMissingError) Is(target error) bool {
 	return target == ErrTemplateMissing || errors.Is(target, ErrProfileInvalid)
 }
+
+// EP04US-006 sentinels — appended at the bottom of the existing var block.
+var (
+	// ErrProfileTargetExists is returned by the profile init use case when
+	// the resolved target directory already exists on disk. The CLI
+	// translator (cli/format/errors.go) renders it with a hint to remove
+	// the existing directory or use a different name.
+	ErrProfileTargetExists = errors.New("profile target directory already exists")
+
+	// ErrProfileNotFound is returned by ResolveProfilePort when an
+	// explicitly-requested profile name cannot be found either as a
+	// user directory or as a bundled embed. Wraps neither
+	// ErrNoProfileMatch nor ErrBundledProfileNotFound — it is the
+	// distinct "user asked for X by name and X does not exist" case.
+	ErrProfileNotFound = errors.New("profile not found")
+)
+
+// ProfileTargetExistsError carries the resolved target directory so the
+// translator can echo the path back to the user. errors.Is matches both
+// ErrProfileTargetExists and (no other sentinel — this is the only
+// dimension).
+//
+// The Error() literal format is:
+//
+//	profile target directory %q already exists
+//
+// — kept short; the human-friendly suggestion ("remove it first or
+// choose a different name") is appended by the CLI translator so it
+// can be skinned per locale in the future without re-flowing domain
+// strings.
+type ProfileTargetExistsError struct {
+	Target string
+}
+
+func (e *ProfileTargetExistsError) Error() string {
+	return fmt.Sprintf("profile target directory %q already exists", e.Target)
+}
+
+func (e *ProfileTargetExistsError) Is(target error) bool {
+	return target == ErrProfileTargetExists
+}
+
+// UnknownBundledProfileError carries the requested name and the sorted
+// list of bundled profile names so the translator can produce the
+// "unknown bundled profile %q; available: a, b, c" stderr line.
+//
+// errors.Is(err, ErrBundledProfileNotFound) returns true so the
+// translator can switch on the existing sentinel from US-001 if it
+// chooses to.
+type UnknownBundledProfileError struct {
+	Name      string
+	Available []string // alphabetically sorted
+}
+
+func (e *UnknownBundledProfileError) Error() string {
+	return fmt.Sprintf("unknown bundled profile %q; available: %s", e.Name, strings.Join(e.Available, ", "))
+}
+
+func (e *UnknownBundledProfileError) Is(target error) bool {
+	return target == ErrBundledProfileNotFound
+}

@@ -13,6 +13,9 @@ func NewRootCmd(d Deps) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
+	profileCmd := command.NewProfileCmd(d.Logger)
+	profileCmd.AddCommand(command.NewProfileInitCmd(d.InitProfile, d.ProfilesDir, d.Logger))
+
 	root.AddCommand(
 		command.NewScanCmd(d.ScanFactory, d.Refactor, d.Logger),
 		command.NewQueryCmd(d.Query, d.Logger),
@@ -21,6 +24,7 @@ func NewRootCmd(d Deps) *cobra.Command {
 		command.NewScaffoldCmd(d.Scaffold, d.WorkDir, d.PlansDir, d.Logger),
 		command.NewListCmd(d.Query, d.Logger),
 		command.NewAuditCmd(d.Audit, d.Logger),
+		profileCmd,
 	)
 	return root
 }

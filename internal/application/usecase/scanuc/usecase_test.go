@@ -34,12 +34,13 @@ func (f *fakeClassifyDeclarativePort) ClassifyDeclarative(
 	return nil, nil
 }
 
-type fakeDetectPort struct {
-	detect func(ctx context.Context, fsys fs.FS) (*model.FrameworkProfile, error)
+// fakeProfileResolver is a hand-rolled fake satisfying profile.ResolveProfilePort.
+type fakeProfileResolver struct {
+	resolve func(ctx context.Context, input profilevo.ResolveProfileInput) (*model.ProfileBundle, error)
 }
 
-func (f *fakeDetectPort) Detect(ctx context.Context, fsys fs.FS) (*model.FrameworkProfile, error) {
-	return f.detect(ctx, fsys)
+func (f *fakeProfileResolver) Resolve(ctx context.Context, input profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
+	return f.resolve(ctx, input)
 }
 
 type fakeWalkPort struct {
@@ -100,14 +101,29 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
+// recordingHandler captures slog.Record entries for assertion in tests.
+type recordingHandler struct {
+	records []slog.Record
+}
+
+func (h *recordingHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.records = append(h.records, r)
+	return nil
+}
+
+func (h *recordingHandler) WithAttrs(attrs []slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(name string) slog.Handler       { return h }
+
 func buildMinimalUseCase(
-	detectFn func(context.Context, fs.FS) (*model.FrameworkProfile, error),
+	resolveFn func(context.Context, profilevo.ResolveProfileInput) (*model.ProfileBundle, error),
 	walkFn func(context.Context, fs.FS) ([]string, error),
 	parseFn func(context.Context, fs.FS, string) (model.JavaFileSummary, error),
 	saveFn func(context.Context, *model.ProjectState) error,
 ) *appscanuc.Impl {
 	return appscanuc.New(
-		&fakeDetectPort{detect: detectFn},
+		&fakeProfileResolver{resolve: resolveFn},
 		&fakeClassifyDeclarativePort{},
 		&fakeWalkPort{walk: walkFn},
 		&fakeParsePort{parse: parseFn},
@@ -121,18 +137,27 @@ func buildMinimalUseCase(
 			return 0, nil
 		}},
 		&fakeSavePort{save: saveFn},
+		".jitctx/profiles",
 		noopLogger(),
 	)
 }
 
-func minimalProfile() *model.FrameworkProfile {
-	return &model.FrameworkProfile{
-		Name:      "spring-boot-hexagonal",
-		Languages: []string{"java"},
-		Rules: []model.ProfileRule{
-			{Match: model.ProfileMatch{NodeType: "interface_declaration", PathContains: "/port/in/"}, ClassifyAs: model.ContractInputPort},
+func minimalBundle() *model.ProfileBundle {
+	return &model.ProfileBundle{
+		Profile: &model.FrameworkProfile{
+			Name:      "spring-boot-hexagonal",
+			Languages: []string{"java"},
+			Rules: []model.ProfileRule{
+				{Match: model.ProfileMatch{NodeType: "interface_declaration", PathContains: "/port/in/"}, ClassifyAs: model.ContractInputPort},
+			},
 		},
 	}
+}
+
+func minimalBundleWithSource(source model.ProfileSource) *model.ProfileBundle {
+	b := minimalBundle()
+	b.Profile.Source = source
+	return b
 }
 
 // --- Tests ---
@@ -142,7 +167,9 @@ func TestScanUC_HappyPath(t *testing.T) {
 
 	saved := false
 	uc := buildMinimalUseCase(
-		func(_ context.Context, _ fs.FS) (*model.FrameworkProfile, error) { return minimalProfile(), nil },
+		func(_ context.Context, _ profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
+			return minimalBundle(), nil
+		},
 		func(_ context.Context, _ fs.FS) ([]string, error) {
 			return []string{"src/main/java/com/app/user/port/in/CreateUserUseCase.java"}, nil
 		},
@@ -178,7 +205,7 @@ func TestScanUC_ErrNoProfileMatch(t *testing.T) {
 	t.Parallel()
 
 	uc := buildMinimalUseCase(
-		func(_ context.Context, _ fs.FS) (*model.FrameworkProfile, error) {
+		func(_ context.Context, _ profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
 			return nil, domerr.ErrNoProfileMatch
 		},
 		func(_ context.Context, _ fs.FS) ([]string, error) { return nil, nil },
@@ -196,7 +223,9 @@ func TestScanUC_PartialParseSkipped(t *testing.T) {
 	t.Parallel()
 
 	uc := buildMinimalUseCase(
-		func(_ context.Context, _ fs.FS) (*model.FrameworkProfile, error) { return minimalProfile(), nil },
+		func(_ context.Context, _ profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
+			return minimalBundle(), nil
+		},
 		func(_ context.Context, _ fs.FS) ([]string, error) {
 			return []string{"Broken.java"}, nil
 		},
@@ -219,7 +248,9 @@ func TestScanUC_Cancellation(t *testing.T) {
 	cancel() // cancel immediately
 
 	uc := buildMinimalUseCase(
-		func(_ context.Context, _ fs.FS) (*model.FrameworkProfile, error) { return minimalProfile(), nil },
+		func(_ context.Context, _ profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
+			return minimalBundle(), nil
+		},
 		func(_ context.Context, _ fs.FS) ([]string, error) { return nil, nil },
 		func(_ context.Context, _ fs.FS, _ string) (model.JavaFileSummary, error) {
 			return model.JavaFileSummary{}, nil
@@ -231,11 +262,19 @@ func TestScanUC_Cancellation(t *testing.T) {
 	require.True(t, errors.Is(err, context.Canceled))
 }
 
+// TestScanUC_ProfileNameMismatch is preserved for backwards compatibility:
+// when the resolver returns ErrNoProfileMatch the use case propagates it.
 func TestScanUC_ProfileNameMismatch(t *testing.T) {
 	t.Parallel()
 
 	uc := buildMinimalUseCase(
-		func(_ context.Context, _ fs.FS) (*model.FrameworkProfile, error) { return minimalProfile(), nil },
+		func(_ context.Context, in profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
+			// Simulate the resolver rejecting the explicit name.
+			if in.Name != "" {
+				return nil, domerr.ErrNoProfileMatch
+			}
+			return minimalBundle(), nil
+		},
 		func(_ context.Context, _ fs.FS) ([]string, error) { return nil, nil },
 		func(_ context.Context, _ fs.FS, _ string) (model.JavaFileSummary, error) {
 			return model.JavaFileSummary{}, nil
@@ -248,4 +287,136 @@ func TestScanUC_ProfileNameMismatch(t *testing.T) {
 		ProfileName: "other-profile",
 	})
 	require.True(t, errors.Is(err, domerr.ErrNoProfileMatch))
+}
+
+// TestScanUC_LogsProfileSource_Custom asserts that when the resolver returns a
+// bundle with Source == ProfileSourceCustom the use case emits a log record
+// with msg "Profile: spring-boot-hexagonal" and attribute source="custom".
+func TestScanUC_LogsProfileSource_Custom(t *testing.T) {
+	t.Parallel()
+
+	handler := &recordingHandler{}
+	logger := slog.New(handler)
+
+	uc := appscanuc.New(
+		&fakeProfileResolver{
+			resolve: func(_ context.Context, _ profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
+				return minimalBundleWithSource(model.ProfileSourceCustom), nil
+			},
+		},
+		&fakeClassifyDeclarativePort{},
+		&fakeWalkPort{walk: func(_ context.Context, _ fs.FS) ([]string, error) { return nil, nil }},
+		&fakeParsePort{parse: func(_ context.Context, _ fs.FS, _ string) (model.JavaFileSummary, error) {
+			return model.JavaFileSummary{}, nil
+		}},
+		&fakeDiscoverPort{discover: func(_ context.Context, _ fs.FS) ([]model.Context, error) {
+			return nil, nil
+		}},
+		&fakeReadBodyPort{read: func(_ context.Context, _ fs.FS, _ string) (string, error) {
+			return "", nil
+		}},
+		&fakeEstimatePort{estimate: func(_ context.Context, _ string) (int, error) { return 0, nil }},
+		&fakeSavePort{save: func(_ context.Context, _ *model.ProjectState) error { return nil }},
+		".jitctx/profiles",
+		logger,
+	)
+
+	_, err := uc.Execute(context.Background(), scanvo.ScanProjectInput{WorkDir: t.TempDir()})
+	require.NoError(t, err)
+
+	var found bool
+	for _, rec := range handler.records {
+		if rec.Message != "Profile: spring-boot-hexagonal" {
+			continue
+		}
+		rec.Attrs(func(a slog.Attr) bool {
+			if a.Key == "source" && a.Value.String() == "custom" {
+				found = true
+			}
+			return true
+		})
+	}
+	require.True(t, found, "expected slog record with msg 'Profile: spring-boot-hexagonal' and source=custom")
+}
+
+// TestScanUC_LogsProfileSource_Bundled asserts that when the resolver returns a
+// bundle with Source == ProfileSourceBundled the use case emits a log record
+// with msg "Profile: spring-boot-hexagonal" and attribute source="bundled".
+func TestScanUC_LogsProfileSource_Bundled(t *testing.T) {
+	t.Parallel()
+
+	handler := &recordingHandler{}
+	logger := slog.New(handler)
+
+	uc := appscanuc.New(
+		&fakeProfileResolver{
+			resolve: func(_ context.Context, _ profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
+				return minimalBundleWithSource(model.ProfileSourceBundled), nil
+			},
+		},
+		&fakeClassifyDeclarativePort{},
+		&fakeWalkPort{walk: func(_ context.Context, _ fs.FS) ([]string, error) { return nil, nil }},
+		&fakeParsePort{parse: func(_ context.Context, _ fs.FS, _ string) (model.JavaFileSummary, error) {
+			return model.JavaFileSummary{}, nil
+		}},
+		&fakeDiscoverPort{discover: func(_ context.Context, _ fs.FS) ([]model.Context, error) {
+			return nil, nil
+		}},
+		&fakeReadBodyPort{read: func(_ context.Context, _ fs.FS, _ string) (string, error) {
+			return "", nil
+		}},
+		&fakeEstimatePort{estimate: func(_ context.Context, _ string) (int, error) { return 0, nil }},
+		&fakeSavePort{save: func(_ context.Context, _ *model.ProjectState) error { return nil }},
+		".jitctx/profiles",
+		logger,
+	)
+
+	_, err := uc.Execute(context.Background(), scanvo.ScanProjectInput{WorkDir: t.TempDir()})
+	require.NoError(t, err)
+
+	var found bool
+	for _, rec := range handler.records {
+		if rec.Message != "Profile: spring-boot-hexagonal" {
+			continue
+		}
+		rec.Attrs(func(a slog.Attr) bool {
+			if a.Key == "source" && a.Value.String() == "bundled" {
+				found = true
+			}
+			return true
+		})
+	}
+	require.True(t, found, "expected slog record with msg 'Profile: spring-boot-hexagonal' and source=bundled")
+}
+
+// TestScanUC_ResolverError_Propagates asserts that when the resolver returns an
+// *UnknownBundledProfileError the use case propagates it unchanged so that
+// errors.Is(err, ErrBundledProfileNotFound) is true at the caller.
+func TestScanUC_ResolverError_Propagates(t *testing.T) {
+	t.Parallel()
+
+	resolverErr := &domerr.UnknownBundledProfileError{
+		Name:      "spring-boot-hexagonal",
+		Available: []string{"spring-boot-hexagonal"},
+	}
+
+	uc := buildMinimalUseCase(
+		func(_ context.Context, _ profilevo.ResolveProfileInput) (*model.ProfileBundle, error) {
+			return nil, resolverErr
+		},
+		func(_ context.Context, _ fs.FS) ([]string, error) { return nil, nil },
+		func(_ context.Context, _ fs.FS, _ string) (model.JavaFileSummary, error) {
+			return model.JavaFileSummary{}, nil
+		},
+		func(_ context.Context, _ *model.ProjectState) error { return nil },
+	)
+
+	_, err := uc.Execute(context.Background(), scanvo.ScanProjectInput{WorkDir: t.TempDir()})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, domerr.ErrBundledProfileNotFound),
+		"expected errors.Is(err, ErrBundledProfileNotFound) to be true; got: %v", err)
+
+	var typed *domerr.UnknownBundledProfileError
+	require.True(t, errors.As(err, &typed))
+	require.Equal(t, "spring-boot-hexagonal", typed.Name)
 }

@@ -1,0 +1,81 @@
+name: spring-boot-hexagonal
+languages: [java]
+query_lang: java
+
+# Auto-detection — feature lines 171-181.
+detect:
+  files:
+    - name: pom.xml                    # Maven     (line 172)
+      contains: "org.springframework.boot"
+    - name: build.gradle               # Gradle    (line 178)
+      contains: "org.springframework.boot"
+    - name: build.gradle.kts           # Gradle KTS (inferred from same)
+      contains: "org.springframework.boot"
+
+module_detection:
+  strategy: hexagonal
+  roots:
+    - src/main/java/**/domain
+    - src/main/java/**
+  markers:
+    - kind: path_contains
+      value: /port/in/
+    - kind: path_contains
+      value: /port/out/
+    - kind: annotation
+      value: Entity
+
+# Classification — order matters (first match wins). Each rule carries
+# an inline comment pointing back to the Gherkin scenario it satisfies.
+rules:
+  # Scenario: Classify input port by path convention (line 182)
+  - match:
+      node_type: interface_declaration
+      path_contains: /port/in/
+    classify_as: input-port
+
+  # Scenario: Classify output port by path convention (line 187)
+  - match:
+      node_type: interface_declaration
+      path_contains: /port/out/
+    classify_as: output-port
+
+  # Scenario: Classify entity by @Entity annotation (line 192)
+  - match:
+      node_type: class_declaration
+      has_annotation: Entity
+    classify_as: entity
+
+  # Scenario: Classify REST adapter by @RestController annotation (line 197)
+  - match:
+      node_type: class_declaration
+      has_annotation: RestController
+    classify_as: rest-adapter
+
+  # @Repository is not in the Gherkin but is required by EP01RF-012 §Business Rule.
+  - match:
+      node_type: class_declaration
+      has_annotation: Repository
+    classify_as: jpa-adapter
+
+  # Scenario: Classify service by UseCase implementation (line 202)
+  # Implements rules FIRST so that a class matching both *UseCase and @Service
+  # stays deterministic if the user extends classify_as later.
+  - match:
+      node_type: class_declaration
+      implements: "*UseCase"
+      path_contains: /service/
+    classify_as: service
+
+  - match:
+      node_type: class_declaration
+      implements: "*UseCase"
+      path_contains: /application/
+    classify_as: service
+
+  # @Service catch-all (covers classes that don't implement *UseCase but are
+  # annotated). Not asserted by any Gherkin — retained from the merged MVP.
+  - match:
+      node_type: class_declaration
+      has_annotation: Service
+    classify_as: service
