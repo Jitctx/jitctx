@@ -72,7 +72,7 @@ func newPlanLayersCmdFor(t *testing.T, workDir, plansDir string) (*cobra.Command
 	mapper := service.NewContractPathMapper()
 	realLayers := appplanuc.New(specFinder, parser, layerer, mapper, logger)
 
-	cmd := command.NewPlanCmd(realLayers, stubPlanNew{}, workDir, plansDir, logger)
+	cmd := command.NewPlanCmd(realLayers, stubPlanNew{}, nil, workDir, plansDir, logger)
 
 	stdoutBuf := &bytes.Buffer{}
 	cmd.SetOut(stdoutBuf)

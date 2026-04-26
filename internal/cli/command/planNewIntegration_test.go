@@ -42,7 +42,7 @@ func newPlanCmdFor(t *testing.T, workDir, plansDir string) (*cobra.Command, *byt
 	realPlanNew := appplannewuc.New(renderer, writer, resolver, logger)
 
 	var stdout, stderr bytes.Buffer
-	cmd := command.NewPlanCmd(stubLayersPlan{}, realPlanNew, workDir, plansDir, logger)
+	cmd := command.NewPlanCmd(stubLayersPlan{}, realPlanNew, nil, workDir, plansDir, logger)
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	return cmd, &stdout, &stderr

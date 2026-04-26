@@ -9,8 +9,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jitctx/jitctx/internal/cli/format"
+	"github.com/jitctx/jitctx/internal/domain/usecase/diffuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/plannewuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/planuc"
+	diffvo "github.com/jitctx/jitctx/internal/domain/vo/diff"
 	planvo "github.com/jitctx/jitctx/internal/domain/vo/plan"
 )
 
@@ -20,11 +22,13 @@ type planOpts struct {
 	feature    string
 	file       string
 	format     string
+	diff       bool // EP03US-003: compare spec against manifest
 }
 
 func NewPlanCmd(
 	layers planuc.UseCase,
 	newTpl plannewuc.UseCase,
+	diff diffuc.UseCase,
 	workDir string,
 	plansDir string,
 	logger *slog.Logger,
@@ -59,6 +63,13 @@ func NewPlanCmd(
 			default:
 				return fmt.Errorf("--format must be text or json, got %q", opts.format)
 			}
+			// --diff validation (after existing exclusivity checks)
+			if opts.diff && opts.newFeature != "" {
+				return errors.New("--diff cannot be combined with --new")
+			}
+			if opts.diff && opts.format == "json" {
+				return errors.New("--diff is markdown-only; --format json is not supported")
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -82,7 +93,21 @@ func NewPlanCmd(
 				return nil
 			}
 
-			// --feature / --file mode (NEW for US-003)
+			// --diff mode (EP03US-003)
+			if opts.diff {
+				out, err := diff.Execute(cmd.Context(), diffvo.DiffPlanInput{
+					Feature:  opts.feature,
+					FilePath: opts.file,
+					BaseDir:  workDir,
+					PlansDir: plansDir,
+				})
+				if err != nil {
+					return format.TranslateError(err)
+				}
+				return format.WriteDiffPlanReport(cmd.OutOrStdout(), out)
+			}
+
+			// --feature / --file mode (layered planner)
 			out, err := layers.Execute(cmd.Context(), planvo.LayersInput{
 				Feature:  opts.feature,
 				FilePath: opts.file,
@@ -103,6 +128,7 @@ func NewPlanCmd(
 	cmd.Flags().StringVar(&opts.feature, "feature", "", "feature name for layers mode (mutually exclusive with --new and --file)")
 	cmd.Flags().StringVar(&opts.file, "file", "", "explicit spec path for layers mode (mutually exclusive with --new and --feature)")
 	cmd.Flags().StringVar(&opts.format, "format", "text", "output format for layers mode: text|json")
+	cmd.Flags().BoolVar(&opts.diff, "diff", false, "diff mode: compare the spec against the manifest's current state")
 	_ = logger
 	return cmd
 }

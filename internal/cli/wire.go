@@ -5,6 +5,7 @@ import (
 
 	appaudituc "github.com/jitctx/jitctx/internal/application/usecase/audituc"
 	appcontractsuc "github.com/jitctx/jitctx/internal/application/usecase/contractsuc"
+	appdiffuc "github.com/jitctx/jitctx/internal/application/usecase/diffuc"
 	appplannewuc "github.com/jitctx/jitctx/internal/application/usecase/plannewuc"
 	appplanuc "github.com/jitctx/jitctx/internal/application/usecase/planuc"
 	appqueryuc "github.com/jitctx/jitctx/internal/application/usecase/queryuc"
@@ -14,6 +15,7 @@ import (
 	"github.com/jitctx/jitctx/internal/config"
 	"github.com/jitctx/jitctx/internal/domain/usecase/audituc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/contractsuc"
+	"github.com/jitctx/jitctx/internal/domain/usecase/diffuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/plannewuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/planuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/queryuc"
@@ -36,6 +38,7 @@ type Deps struct {
 	Query       queryuc.UseCase
 	Plan        planuc.UseCase
 	PlanNew     plannewuc.UseCase
+	Diff        diffuc.UseCase
 	Contracts   contractsuc.UseCase
 	Scaffold    scaffolduc.UseCase
 	Audit       audituc.UseCase
@@ -89,15 +92,18 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	auditRulesLoader := fsprofile.NewAuditRulesLoader(cfg.ProfilesDir, logger)
 	auditEvaluator := domspecsvc.NewAuditEvaluator()
 
+	layerer := domspecsvc.NewDependencyLayerer()
+	differ := domspecsvc.NewContractDiffer(domspecsvc.NewSignatureNormalizer())
+
 	return Deps{
 		ScanFactory: scanFactory,
 		Query:       appqueryuc.New(manifestStore, ctxDiscoverer, estimator, logger),
 		Plan: func() planuc.UseCase {
-			layerer := domspecsvc.NewDependencyLayerer()
 			mapper := domspecsvc.NewContractPathMapper()
 			return appplanuc.New(specFinder, mdParser, layerer, mapper, logger)
 		}(),
 		PlanNew: appplannewuc.New(specRenderer, specWriter, pathResolver, logger),
+		Diff:    appdiffuc.New(specFinder, mdParser, manifestStore, differ, layerer, logger),
 		Contracts: appcontractsuc.New(
 			specFinder,
 			mdParser,

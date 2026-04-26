@@ -1,0 +1,13 @@
+generated_at: 2026-04-25T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: layered-module
+    path: src/main/java/com/app/layered
+    tags: []
+    contracts: []
+    dependencies: []
+contexts: []

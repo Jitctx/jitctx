@@ -1,0 +1,22 @@
+generated_at: 2026-04-25T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: user-management
+    path: src/main/java/com/app/user
+    tags: []
+    contracts:
+      - name: UserService
+        type: service
+        path: src/main/java/com/app/user/service/UserService.java
+        methods:
+          - signature: void doWork()
+      - name: DeprecatedHelper
+        type: service
+        path: src/main/java/com/app/user/service/DeprecatedHelper.java
+        methods: []
+    dependencies: []
+contexts: []
