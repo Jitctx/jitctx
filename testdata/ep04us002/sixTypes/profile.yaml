@@ -1,0 +1,18 @@
+name: spring-boot-hexagonal
+language: java
+types:
+  - id: input-port
+    description: Inbound port interface (driven side)
+  - id: output-port
+    description: Outbound port interface (driving side)
+  - id: entity
+    description: Domain entity with identity
+  - id: aggregate-root
+    description: Aggregate root entity
+  - id: service
+    description: Application or domain service
+    classification:
+      - kind: class
+        has_annotation: Service
+  - id: rest-adapter
+    description: REST inbound adapter (controller)

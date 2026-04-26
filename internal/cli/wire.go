@@ -67,6 +67,11 @@ type Deps struct {
 	// BundledProfiles satisfies both profile.LoadBundledProfilePort and
 	// profile.ListBundledProfilesPort. Backed by *fsprofile.Bundled.
 	BundledProfiles bundledProfiles
+
+	// DeclarativeClassifier satisfies profile.ClassifyDeclarativePort.
+	// Backed by *service.DeclarativeClassifier. Exposed so US-003 can
+	// inject it into scanuc.Impl without a second wire.go edit.
+	DeclarativeClassifier profileport.ClassifyDeclarativePort
 }
 
 func Wire(cfg config.Config, logger *slog.Logger) Deps {
@@ -182,10 +187,11 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 				logger,
 			)
 		}(),
-		WorkDir:             cfg.WorkDir,
-		PlansDir:            cfg.PlansDir,
-		Logger:              logger,
-		ProfileBundleLoader: profileBundleLoader,
-		BundledProfiles:     bundled,
+		WorkDir:               cfg.WorkDir,
+		PlansDir:              cfg.PlansDir,
+		Logger:                logger,
+		ProfileBundleLoader:   profileBundleLoader,
+		BundledProfiles:       bundled,
+		DeclarativeClassifier: domspecsvc.NewDeclarativeClassifier(),
 	}
 }

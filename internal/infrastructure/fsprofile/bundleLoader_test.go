@@ -32,6 +32,11 @@ func ep04Fixture(t *testing.T, scenario string) string {
 	return filepath.Join(repoRoot(t), "testdata", "ep04us001", scenario)
 }
 
+func ep04us002Fixture(t *testing.T, scenario string) string {
+	t.Helper()
+	return filepath.Join(repoRoot(t), "testdata", "ep04us002", scenario)
+}
+
 func nopBundleLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
@@ -163,4 +168,97 @@ func TestBundleLoader_ContextCancelled(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled),
 		"expected context.Canceled, got: %v", err)
+}
+
+// ---------------------------------------------------------------------------
+// EP04US-002 tests — declarative type classification fields (T6-G3)
+// ---------------------------------------------------------------------------
+
+// TestBundleLoader_LoadsSixEP03Types asserts that a profile.yaml declaring
+// all six EP-03 type IDs is loaded into a bundle whose RawTypes slice contains
+// exactly those 6 entries in declared order.
+func TestBundleLoader_LoadsSixEP03Types(t *testing.T) {
+	t.Parallel()
+
+	dir := ep04us002Fixture(t, "sixTypes")
+	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+
+	bundle, err := loader.LoadBundle(t.Context(), bundleInput(dir, ""))
+	require.NoError(t, err)
+	require.NotNil(t, bundle)
+
+	wantIDs := []string{
+		"input-port",
+		"output-port",
+		"entity",
+		"aggregate-root",
+		"service",
+		"rest-adapter",
+	}
+	require.Len(t, bundle.RawTypes, len(wantIDs), "expected exactly %d type entries", len(wantIDs))
+
+	gotIDs := make([]string, len(bundle.RawTypes))
+	for i, rt := range bundle.RawTypes {
+		gotIDs[i] = rt.ID
+	}
+	require.Equal(t, wantIDs, gotIDs, "RawTypes IDs must match declared order")
+
+	// Verify the classification slice for the one entry that declares it.
+	var serviceType *model.ProfileTypeDeclaration
+	for i := range bundle.RawTypes {
+		if bundle.RawTypes[i].ID == "service" {
+			serviceType = &bundle.RawTypes[i]
+			break
+		}
+	}
+	require.NotNil(t, serviceType, "service type must be present")
+	require.NotEmpty(t, serviceType.Classification, "service type must have at least one classification rule")
+}
+
+// TestBundleLoader_LoadsCustomDomainEventType asserts that a profile.yaml
+// declaring a single "domain-event" type with an implements_all classification
+// rule is loaded correctly — proving new types can be added purely declaratively.
+func TestBundleLoader_LoadsCustomDomainEventType(t *testing.T) {
+	t.Parallel()
+
+	dir := ep04us002Fixture(t, "customDomainEvent")
+	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+
+	bundle, err := loader.LoadBundle(t.Context(), bundleInput(dir, ""))
+	require.NoError(t, err)
+	require.NotNil(t, bundle)
+
+	var domainEventType *model.ProfileTypeDeclaration
+	for i := range bundle.RawTypes {
+		if bundle.RawTypes[i].ID == "domain-event" {
+			domainEventType = &bundle.RawTypes[i]
+			break
+		}
+	}
+	require.NotNil(t, domainEventType, "bundle must contain a type with ID \"domain-event\"")
+	require.NotEmpty(t, domainEventType.Classification, "domain-event must have at least one classification rule")
+
+	firstRule := domainEventType.Classification[0]
+	require.Equal(t, []string{"DomainEvent"}, firstRule.ImplementsAll,
+		"first classification rule must have ImplementsAll == [DomainEvent]")
+}
+
+// TestBundleLoader_LoadsOrSemanticsType asserts that a profile.yaml declaring
+// a type with TWO classification entries is loaded with both entries preserved
+// in order — the loader must not collapse OR entries.
+func TestBundleLoader_LoadsOrSemanticsType(t *testing.T) {
+	t.Parallel()
+
+	dir := ep04us002Fixture(t, "orSemantics")
+	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+
+	bundle, err := loader.LoadBundle(t.Context(), bundleInput(dir, ""))
+	require.NoError(t, err)
+	require.NotNil(t, bundle)
+	require.NotEmpty(t, bundle.RawTypes, "bundle must have at least one type entry")
+
+	// The OR-semantics fixture declares exactly one type; grab it.
+	orType := bundle.RawTypes[0]
+	require.GreaterOrEqual(t, len(orType.Classification), 2,
+		"type must have at least 2 classification entries to express OR semantics")
 }

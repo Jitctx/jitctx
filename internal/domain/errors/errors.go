@@ -236,6 +236,15 @@ func (e *ScaffoldRenderError) Unwrap() error { return e.Cause }
 
 func (e *ScaffoldRenderError) Is(target error) bool { return target == ErrScaffoldRender }
 
+// EP04US-002 sentinels — appended at the bottom of the existing var block.
+var (
+	// ErrClassificationInvalid is returned when a classification rule entry
+	// is structurally malformed at YAML decode time (e.g., the `kind` value
+	// is a sequence instead of a string). Wraps ErrProfileInvalid for
+	// errors.Is matching.
+	ErrClassificationInvalid = errors.New("classification rule invalid")
+)
+
 // EP04US-001 sentinels — appended at the bottom of the existing var blocks.
 var (
 	// ErrProfileYamlMissing is returned when a profile bundle directory

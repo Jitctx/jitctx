@@ -45,9 +45,28 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte) (*model.ProfileB
 				}
 			}
 		}
+		classification := make([]model.ClassificationRule, 0, len(t.Classification))
+		for _, c := range t.Classification {
+			classification = append(classification, model.ClassificationRule{
+				Kind:           c.Kind,
+				ImplementsAll:  append([]string(nil), c.ImplementsAll...),
+				ImplementsNone: append([]string(nil), c.ImplementsNone...),
+				HasAnnotation:  c.HasAnnotation,
+				PathContains:   c.PathContains,
+			})
+		}
+
+		raw, err := yaml.Marshal(t)
+		if err != nil {
+			return nil, fmt.Errorf("re-marshal type %q: %w", t.ID, err)
+		}
+
 		rawTypes = append(rawTypes, model.ProfileTypeDeclaration{
-			ID:       t.ID,
-			Template: t.Template,
+			ID:             t.ID,
+			Template:       t.Template,
+			Description:    t.Description,
+			Classification: classification,
+			Raw:            raw,
 		})
 	}
 

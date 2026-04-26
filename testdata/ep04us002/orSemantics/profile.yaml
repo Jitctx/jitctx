@@ -1,0 +1,12 @@
+name: spring-boot-hexagonal
+language: java
+types:
+  - id: use-case
+    description: Application use case service (OR across two classification entries)
+    classification:
+      - kind: class
+        implements_all:
+          - CreateUserUseCase
+      - kind: class
+        implements_all:
+          - DeleteUserUseCase

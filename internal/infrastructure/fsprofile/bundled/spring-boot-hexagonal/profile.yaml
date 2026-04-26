@@ -1,5 +1,46 @@
 name: spring-boot-hexagonal
 language: java
-# US-001 ships a bundle skeleton. The full type/classification/packaging
-# content lands with EP04US-002 and EP04US-004 (parity).
-types: []
+# EP04US-002 introduces declarative architectural types for the bundled
+# profile. The six EP-03 types are reproduced under the new schema.
+# template fields are intentionally empty — templates ship in EP04US-004
+# (parity rebuild). Full target_path, has_test, and packaging blocks are
+# also EP04US-004 work.
+types:
+  - id: input-port
+    description: Input port — driving-side interface, named *UseCase by convention.
+    classification:
+      - kind: interface
+        path_contains: /port/in/
+
+  - id: output-port
+    description: Output port — driven-side interface for outbound integrations.
+    classification:
+      - kind: interface
+        path_contains: /port/out/
+
+  - id: entity
+    description: Domain entity — JPA-annotated persistent class.
+    classification:
+      - kind: class
+        has_annotation: Entity
+
+  - id: aggregate-root
+    description: Aggregate root marker — populated declaratively in EP04US-004.
+    # Empty classification in EP04US-002 — the EP-03 codebase derives
+    # aggregate-root via field-level inspection (composition over
+    # annotations). Reproducing that semantically is EP04US-004 scope.
+    classification: []
+
+  - id: service
+    description: Application service implementing one or more input ports.
+    classification:
+      - kind: class
+        implements_all:
+          - "*UseCase"
+        path_contains: /service/
+
+  - id: rest-adapter
+    description: REST inbound adapter — Spring @RestController.
+    classification:
+      - kind: class
+        has_annotation: RestController

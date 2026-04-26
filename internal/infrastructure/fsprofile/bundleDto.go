@@ -16,6 +16,20 @@ type bundleDTO struct {
 }
 
 type bundleTypeDTO struct {
-	ID       string `yaml:"id"`
-	Template string `yaml:"template"`
+	ID             string                    `yaml:"id"`
+	Template       string                    `yaml:"template"`
+	Description    string                    `yaml:"description"`
+	Classification []bundleClassificationDTO `yaml:"classification"`
+}
+
+// bundleClassificationDTO mirrors model.ClassificationRule one-to-one.
+// The list semantics for ImplementsAll / ImplementsNone are encoded as
+// YAML sequences. HasAnnotation accepts a single string (US-002 pin —
+// list form deferred to US-004).
+type bundleClassificationDTO struct {
+	Kind           string   `yaml:"kind"`
+	ImplementsAll  []string `yaml:"implements_all"`
+	ImplementsNone []string `yaml:"implements_none"`
+	HasAnnotation  string   `yaml:"has_annotation"`
+	PathContains   string   `yaml:"path_contains"`
 }

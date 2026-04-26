@@ -253,3 +253,129 @@ func TestToBundleDomain_MissingIDReturnsError(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, domerr.ErrProfileInvalid))
 }
+
+// --- EP04US-002 tests (T6-G2) ---
+
+func TestToBundleDomain_PreservesClassificationRules(t *testing.T) {
+	t.Parallel()
+
+	dto := bundleDTO{
+		Name:     "classified-profile",
+		Language: "java",
+		Types: []bundleTypeDTO{
+			{
+				ID: "application-service",
+				Classification: []bundleClassificationDTO{
+					{
+						Kind:           "class",
+						ImplementsAll:  []string{"A", "B"},
+						ImplementsNone: []string{"C"},
+						HasAnnotation:  "Service",
+						PathContains:   "application",
+					},
+				},
+			},
+		},
+	}
+
+	bundle, err := toBundleDomain(dto, map[string][]byte{})
+
+	require.NoError(t, err)
+	require.Len(t, bundle.RawTypes, 1)
+
+	rules := bundle.RawTypes[0].Classification
+	require.Len(t, rules, 1)
+	require.Equal(t, "class", rules[0].Kind)
+	require.Equal(t, []string{"A", "B"}, rules[0].ImplementsAll)
+	require.Equal(t, []string{"C"}, rules[0].ImplementsNone)
+	require.Equal(t, "Service", rules[0].HasAnnotation)
+	require.Equal(t, "application", rules[0].PathContains)
+}
+
+func TestToBundleDomain_PreservesDescription(t *testing.T) {
+	t.Parallel()
+
+	const wantDesc = "Application service implementing input ports"
+
+	dto := bundleDTO{
+		Name:     "described-profile",
+		Language: "java",
+		Types: []bundleTypeDTO{
+			{
+				ID:          "application-service",
+				Description: wantDesc,
+			},
+		},
+	}
+
+	bundle, err := toBundleDomain(dto, map[string][]byte{})
+
+	require.NoError(t, err)
+	require.Len(t, bundle.RawTypes, 1)
+	require.Equal(t, wantDesc, bundle.RawTypes[0].Description)
+}
+
+func TestToBundleDomain_RawTypeBytesAreRoundTripped(t *testing.T) {
+	t.Parallel()
+
+	dto := bundleDTO{
+		Name:     "raw-profile",
+		Language: "java",
+		Types: []bundleTypeDTO{
+			{
+				ID: "application-service",
+				Classification: []bundleClassificationDTO{
+					{
+						Kind:          "class",
+						ImplementsAll: []string{"InputPort"},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, err := toBundleDomain(dto, map[string][]byte{})
+
+	require.NoError(t, err)
+	require.Len(t, bundle.RawTypes, 1)
+
+	rawType := bundle.RawTypes[0].Raw
+	require.Greater(t, len(rawType), 0)
+
+	// Unmarshal the raw bytes back into a generic node and confirm both
+	// "id" and "classification" keys are present.
+	var node map[string]any
+	require.NoError(t, yaml.Unmarshal(rawType, &node))
+	_, hasID := node["id"]
+	_, hasClassification := node["classification"]
+	require.True(t, hasID, "raw bytes must contain 'id' key")
+	require.True(t, hasClassification, "raw bytes must contain 'classification' key")
+}
+
+func TestToBundleDomain_SliceCopiesNotAliased(t *testing.T) {
+	t.Parallel()
+
+	dto := bundleDTO{
+		Name:     "aliasing-profile",
+		Language: "java",
+		Types: []bundleTypeDTO{
+			{
+				ID: "application-service",
+				Classification: []bundleClassificationDTO{
+					{
+						ImplementsAll: []string{"X", "Y"},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, err := toBundleDomain(dto, map[string][]byte{})
+	require.NoError(t, err)
+
+	// Mutate the source DTO slice AFTER the mapper has run.
+	dto.Types[0].Classification[0].ImplementsAll[0] = "MUTATED"
+
+	// The produced model slice must not reflect the mutation.
+	require.Equal(t, "X", bundle.RawTypes[0].Classification[0].ImplementsAll[0])
+}

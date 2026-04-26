@@ -1,0 +1,9 @@
+name: spring-boot-hexagonal
+language: java
+types:
+  - id: domain-event
+    description: Domain event value object
+    classification:
+      - kind: class
+        implements_all:
+          - DomainEvent
