@@ -183,13 +183,13 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 		var frameworkAnnotation string
 		switch c.Type {
 		case model.ContractService:
-			frameworkAnnotation = "@Service"
+			frameworkAnnotation = annotationService
 		case model.ContractRestAdapter:
-			frameworkAnnotation = "@RestController"
+			frameworkAnnotation = annotationRestController
 		case model.ContractEntity, model.ContractAggregate:
-			frameworkAnnotation = "@Entity"
+			frameworkAnnotation = annotationEntity
 		case model.ContractJPAAdapter:
-			frameworkAnnotation = "@Repository"
+			frameworkAnnotation = annotationRepository
 		}
 
 		var rawAnnotations []string
@@ -500,7 +500,7 @@ func buildTestImports(
 		importSet["org.junit.jupiter.api.extension.ExtendWith"] = struct{}{}
 		importSet["org.mockito.InjectMocks"] = struct{}{}
 		importSet["org.mockito.Mock"] = struct{}{}
-		importSet["org.mockito.junit.jupiter.MockitoExtension"] = struct{}{}
+		importSet[importTestRunnerExtensionFQN] = struct{}{}
 
 		// For each mock, attempt FQN resolution via the contract index.
 		for _, m := range mocks {
