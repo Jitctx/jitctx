@@ -1,0 +1,9 @@
+name: profile-missing-template
+language: java
+types:
+  - id: service
+    template: missing.tmpl
+    classification:
+      - kind: implements_interface
+        implements_all:
+          - x.y.Service

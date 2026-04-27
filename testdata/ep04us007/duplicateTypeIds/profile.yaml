@@ -1,0 +1,7 @@
+name: profile-duplicate
+language: java
+types:
+  - id: service
+    template: service.java.tmpl
+  - id: service
+    template: service.java.tmpl

@@ -1,0 +1,9 @@
+name: profile-typo
+language: java
+types:
+  - id: service
+    template: service.java.tmpl
+    classification:
+      - kind: implements_interface
+        implementss:
+          - x.y.Service

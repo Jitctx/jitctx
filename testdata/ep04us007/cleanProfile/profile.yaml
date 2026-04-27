@@ -1,0 +1,9 @@
+name: clean-profile
+language: java
+types:
+  - id: service
+    template: service.java.tmpl
+    classification:
+      - kind: implements_interface
+        implements_all:
+          - x.y.Service

@@ -391,3 +391,39 @@ func (e *LanguageUnsupportedError) Error() string {
 func (e *LanguageUnsupportedError) Is(target error) bool {
 	return target == ErrLanguageUnsupported || errors.Is(target, ErrProfileInvalid)
 }
+
+// EP04US-007 sentinels.
+var (
+	// ErrProfileValidationFailed is returned by
+	// profilevalidateuc.UseCase.Execute when the validation report
+	// contains at least one fatal issue. Wraps ErrProfileInvalid for
+	// errors.Is matching so existing translators continue to fire on
+	// the broader sentinel.
+	ErrProfileValidationFailed = errors.New("profile validation failed")
+)
+
+// ProfileValidationError aggregates the fatal issues and warnings
+// produced by a single validate run. Format/errors.go renders Errors
+// as separate stderr lines and surfaces Warnings via the cobra command
+// (so they print even when Execute returns nil). The Error() string is:
+//
+//	profile %q: <count> error(s)
+//
+// — kept short; the per-line rendering is done by the translator.
+//
+// errors.Is(err, ErrProfileValidationFailed) returns true. errors.Is
+// also returns true for ErrProfileInvalid (transitive via the sentinel).
+type ProfileValidationError struct {
+	Path     string
+	Errors   []string // formatted fatal messages, one per slice element
+	Warnings []string // formatted non-fatal messages
+}
+
+func (e *ProfileValidationError) Error() string {
+	return fmt.Sprintf("profile %q: %d error(s)", e.Path, len(e.Errors))
+}
+
+func (e *ProfileValidationError) Is(target error) bool {
+	return target == ErrProfileValidationFailed ||
+		errors.Is(target, ErrProfileInvalid)
+}

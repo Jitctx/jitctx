@@ -16,7 +16,8 @@ func NewProfileCmd(_ *slog.Logger) *cobra.Command {
 		Short: "Manage framework profiles (init, validate)",
 		Long: `Manage framework profiles. Subcommands:
 
-  init <name>      Extract a bundled profile into .jitctx/profiles/<name>/`,
+  init <name>         Extract a bundled profile into .jitctx/profiles/<name>/
+  validate <path>     Validate a profile directory for structural errors`,
 		Args: cobra.NoArgs,
 	}
 }

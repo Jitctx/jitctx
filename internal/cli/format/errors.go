@@ -84,6 +84,19 @@ func TranslateError(err error) error {
 		return fmt.Errorf("unknown bundled profile %q; available: %s",
 			ubp.Name, strings.Join(ubp.Available, ", "))
 	}
+	// EP04US-007 — profile validate: aggregate fatal errors into a
+	// multi-line stderr message. Must appear BEFORE the ErrProfileInvalid
+	// catch-all switch because *ProfileValidationError.Is(ErrProfileInvalid)
+	// returns true and would otherwise be swallowed by that branch.
+	var pve *domerr.ProfileValidationError
+	if errors.As(err, &pve) {
+		var b strings.Builder
+		fmt.Fprintf(&b, "profile %q: %d error(s)", pve.Path, len(pve.Errors))
+		for _, msg := range pve.Errors {
+			fmt.Fprintf(&b, "\n  - %s", msg)
+		}
+		return errors.New(b.String())
+	}
 	// EP04US-006 sentinel — when the resolver cannot find the requested
 	// profile in either user dir or bundled.
 	if errors.Is(err, domerr.ErrProfileNotFound) {

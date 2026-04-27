@@ -9,6 +9,7 @@ import (
 	appplannewuc "github.com/jitctx/jitctx/internal/application/usecase/plannewuc"
 	appplanuc "github.com/jitctx/jitctx/internal/application/usecase/planuc"
 	appprofileinituc "github.com/jitctx/jitctx/internal/application/usecase/profileinituc"
+	appprofilevalidateuc "github.com/jitctx/jitctx/internal/application/usecase/profilevalidateuc"
 	appqueryuc "github.com/jitctx/jitctx/internal/application/usecase/queryuc"
 	apprefactoruc "github.com/jitctx/jitctx/internal/application/usecase/refactoruc"
 	appscaffolduc "github.com/jitctx/jitctx/internal/application/usecase/scaffolduc"
@@ -21,6 +22,7 @@ import (
 	"github.com/jitctx/jitctx/internal/domain/usecase/plannewuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/planuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/profileinituc"
+	"github.com/jitctx/jitctx/internal/domain/usecase/profilevalidateuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/queryuc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/refactoruc"
 	"github.com/jitctx/jitctx/internal/domain/usecase/scaffolduc"
@@ -96,6 +98,10 @@ type Deps struct {
 	// "profile init" cobra subcommand.
 	InitProfile profileinituc.UseCase
 
+	// ValidateProfile is the profile validate use case. Consumed by the
+	// "profile validate" cobra subcommand. EP04US-007.
+	ValidateProfile profilevalidateuc.UseCase
+
 	// BundleAuditRulesLoader satisfies profile.LoadBundleAuditRulesPort.
 	// Backed by *fsprofile.BundleAuditRulesAdapter. EP04US-004.
 	BundleAuditRulesLoader profileport.LoadBundleAuditRulesPort
@@ -142,6 +148,8 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 		profileExtractor, // ExtractBundledProfilePort
 		logger,
 	)
+
+	validateProfileUC := appprofilevalidateuc.New(profileBundleLoader, logger)
 
 	scanFactory := func(manifestPath string) scanuc.UseCase {
 		store := fsmanifest.New(manifestPath)
@@ -258,6 +266,7 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 		ProfileResolver:            profileResolver,
 		ProfileExtractor:           profileExtractor,
 		InitProfile:                initProfileUC,
+		ValidateProfile:            validateProfileUC,      // EP04US-007
 		BundleAuditRulesLoader:     bundleAuditRulesLoader, // EP04US-004
 		BundleScaffoldRenderer:     scaffoldRegistry,       // EP04US-004
 		BundleScaffoldTestRenderer: scaffoldTestRegistry,   // EP04US-004

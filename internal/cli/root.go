@@ -15,6 +15,7 @@ func NewRootCmd(d Deps) *cobra.Command {
 	}
 	profileCmd := command.NewProfileCmd(d.Logger)
 	profileCmd.AddCommand(command.NewProfileInitCmd(d.InitProfile, d.ProfilesDir, d.Logger))
+	profileCmd.AddCommand(command.NewProfileValidateCmd(d.ValidateProfile, d.Logger))
 
 	root.AddCommand(
 		command.NewScanCmd(d.ScanFactory, d.Refactor, d.Logger),
