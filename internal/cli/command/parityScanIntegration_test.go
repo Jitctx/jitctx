@@ -34,7 +34,7 @@ func TestParity_Scan_MatchesEP03Baseline(t *testing.T) {
 	//    through to the bundled embed (ProfileSourceBundled).
 	logger := discardLogger()
 	bundled := fsprofile.NewBundled()
-	bundleLoader := fsprofile.NewBundleLoader(logger)
+	bundleLoader := fsprofile.NewBundleLoader(logger, nil)
 	resolver := fsprofile.NewResolver(bundleLoader, bundled, logger)
 	declarativeClassifier := domspecsvc.NewDeclarativeClassifier()
 	walker := treesitter.NewWalker()

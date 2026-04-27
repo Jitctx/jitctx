@@ -13,8 +13,10 @@ import (
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
 	"github.com/jitctx/jitctx/internal/domain/model"
+	"github.com/jitctx/jitctx/internal/domain/vo"
 	profilevo "github.com/jitctx/jitctx/internal/domain/vo/profile"
 	"github.com/jitctx/jitctx/internal/infrastructure/fsprofile"
+	tsbundled "github.com/jitctx/jitctx/internal/infrastructure/treesitter/bundledqueries"
 )
 
 // repoRoot resolves the repository root from the package directory.
@@ -53,7 +55,7 @@ func TestBundleLoader_LoadsValidDirectory(t *testing.T) {
 	t.Parallel()
 
 	dir := ep04Fixture(t, "valid-profile")
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	bundle, err := loader.LoadBundle(context.Background(), bundleInput(dir, ""))
 	require.NoError(t, err)
@@ -69,7 +71,7 @@ func TestBundleLoader_LoadsTemplatesIntoMemory(t *testing.T) {
 	t.Parallel()
 
 	dir := ep04Fixture(t, "valid-profile")
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	bundle, err := loader.LoadBundle(context.Background(), bundleInput(dir, ""))
 	require.NoError(t, err)
@@ -88,7 +90,7 @@ func TestBundleLoader_MissingProfileYaml(t *testing.T) {
 	t.Parallel()
 
 	dir := ep04Fixture(t, "missing-yaml")
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	_, err := loader.LoadBundle(context.Background(), bundleInput(dir, ""))
 	require.Error(t, err)
@@ -105,7 +107,7 @@ func TestBundleLoader_MissingTemplate(t *testing.T) {
 	t.Parallel()
 
 	dir := ep04Fixture(t, "missing-template")
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	_, err := loader.LoadBundle(context.Background(), bundleInput(dir, ""))
 	require.Error(t, err)
@@ -137,7 +139,7 @@ func TestBundleLoader_PathIsFileNotDir(t *testing.T) {
 
 	// Point Dir at a regular file (profile.yaml inside valid-profile).
 	file := filepath.Join(ep04Fixture(t, "valid-profile"), "profile.yaml")
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	_, err := loader.LoadBundle(context.Background(), bundleInput(file, ""))
 	require.Error(t, err)
@@ -148,7 +150,7 @@ func TestBundleLoader_PathIsFileNotDir(t *testing.T) {
 func TestBundleLoader_NeitherDirNorBundled(t *testing.T) {
 	t.Parallel()
 
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	_, err := loader.LoadBundle(context.Background(), bundleInput("", ""))
 	require.Error(t, err)
@@ -162,7 +164,7 @@ func TestBundleLoader_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	_, err := loader.LoadBundle(ctx, bundleInput(ep04Fixture(t, "valid-profile"), ""))
 	require.Error(t, err)
@@ -181,7 +183,7 @@ func TestBundleLoader_LoadsSixEP03Types(t *testing.T) {
 	t.Parallel()
 
 	dir := ep04us002Fixture(t, "sixTypes")
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	bundle, err := loader.LoadBundle(t.Context(), bundleInput(dir, ""))
 	require.NoError(t, err)
@@ -222,7 +224,7 @@ func TestBundleLoader_LoadsCustomDomainEventType(t *testing.T) {
 	t.Parallel()
 
 	dir := ep04us002Fixture(t, "customDomainEvent")
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	bundle, err := loader.LoadBundle(t.Context(), bundleInput(dir, ""))
 	require.NoError(t, err)
@@ -250,7 +252,7 @@ func TestBundleLoader_LoadsOrSemanticsType(t *testing.T) {
 	t.Parallel()
 
 	dir := ep04us002Fixture(t, "orSemantics")
-	loader := fsprofile.NewBundleLoader(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
 
 	bundle, err := loader.LoadBundle(t.Context(), bundleInput(dir, ""))
 	require.NoError(t, err)
@@ -261,4 +263,83 @@ func TestBundleLoader_LoadsOrSemanticsType(t *testing.T) {
 	orType := bundle.RawTypes[0]
 	require.GreaterOrEqual(t, len(orType.Classification), 2,
 		"type must have at least 2 classification entries to express OR semantics")
+}
+
+// ---------------------------------------------------------------------------
+// EP04US-005: bundled Tree-sitter query attachment
+// ---------------------------------------------------------------------------
+
+func ep04us005Fixture(t *testing.T, scenario string) string {
+	t.Helper()
+	return filepath.Join(repoRoot(t), "testdata", "ep04us005", scenario)
+}
+
+func TestBundleLoader_LoadsLanguageJava_AttachesBundledQueries(t *testing.T) {
+	t.Parallel()
+
+	dir := ep04us005Fixture(t, "profile-a")
+	registry := tsbundled.NewRegistry(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), registry)
+
+	bundle, err := loader.LoadBundle(context.Background(), bundleInput(dir, ""))
+	require.NoError(t, err)
+	require.NotNil(t, bundle)
+	require.Equal(t, vo.LanguageJava, bundle.Profile.Language)
+	require.NotNil(t, bundle.LanguageQueries)
+	require.Equal(t, vo.LanguageJava, bundle.LanguageQueries.Language)
+	require.GreaterOrEqual(t, len(bundle.LanguageQueries.Queries), 1)
+
+	// Scenario 1 explicit clause: the profile directory does not need a
+	// queries/ subdirectory.
+	_, statErr := os.Stat(filepath.Join(dir, "queries"))
+	require.True(t, errors.Is(statErr, os.ErrNotExist),
+		"profile directory must not require a queries/ subdirectory")
+}
+
+func TestBundleLoader_TwoProfilesSameLanguage_ShareQuerySet(t *testing.T) {
+	t.Parallel()
+
+	registry := tsbundled.NewRegistry(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), registry)
+
+	bundleA, err := loader.LoadBundle(context.Background(), bundleInput(ep04us005Fixture(t, "profile-a"), ""))
+	require.NoError(t, err)
+	bundleB, err := loader.LoadBundle(context.Background(), bundleInput(ep04us005Fixture(t, "profile-b"), ""))
+	require.NoError(t, err)
+
+	require.NotNil(t, bundleA.LanguageQueries)
+	require.NotNil(t, bundleB.LanguageQueries)
+	// EP04US-005 Scenario 3: pointer equality proves the binary holds
+	// the Java queries only once.
+	require.Truef(t, bundleA.LanguageQueries == bundleB.LanguageQueries,
+		"expected the same *LanguageQuerySet pointer for two profiles declaring language: java")
+}
+
+func TestBundleLoader_UnsupportedLanguage_FailsWithListing(t *testing.T) {
+	t.Parallel()
+
+	dir := ep04us005Fixture(t, "profile-cobol")
+	registry := tsbundled.NewRegistry(nopBundleLogger())
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), registry)
+
+	_, err := loader.LoadBundle(context.Background(), bundleInput(dir, ""))
+	require.Error(t, err)
+	require.True(t, errors.Is(err, domerr.ErrLanguageUnsupported))
+	require.True(t, errors.Is(err, domerr.ErrProfileInvalid))
+	require.Contains(t, err.Error(), "language 'cobol' is not supported")
+	require.Contains(t, err.Error(), "available:")
+	require.Contains(t, err.Error(), "java")
+}
+
+func TestBundleLoader_NilRegistry_LegacyBehavior(t *testing.T) {
+	t.Parallel()
+
+	dir := ep04us005Fixture(t, "profile-a")
+	loader := fsprofile.NewBundleLoader(nopBundleLogger(), nil)
+
+	bundle, err := loader.LoadBundle(context.Background(), bundleInput(dir, ""))
+	require.NoError(t, err)
+	require.NotNil(t, bundle)
+	require.Nil(t, bundle.LanguageQueries,
+		"nil registry must skip query attachment")
 }

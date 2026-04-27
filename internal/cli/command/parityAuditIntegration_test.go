@@ -34,7 +34,7 @@ func buildBundleAuditUC(t *testing.T, manifestPath string) *appaudituc.Impl {
 	auditRulesLoader := fsprofile.NewAuditRulesLoader("", logger)
 
 	// Bundle path adapters (EP04US-004).
-	bundleLoader := fsprofile.NewBundleLoader(logger)
+	bundleLoader := fsprofile.NewBundleLoader(logger, nil)
 	bundled := fsprofile.NewBundled()
 	resolver := fsprofile.NewResolver(bundleLoader, bundled, logger)
 	bundleAuditRules := fsprofile.NewBundleAuditRulesAdapter()

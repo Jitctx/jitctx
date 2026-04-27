@@ -35,9 +35,11 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/mdspec"
 	"github.com/jitctx/jitctx/internal/infrastructure/token"
 	"github.com/jitctx/jitctx/internal/infrastructure/treesitter"
+	tsbundled "github.com/jitctx/jitctx/internal/infrastructure/treesitter/bundledqueries"
 
 	domspecsvc "github.com/jitctx/jitctx/internal/domain/service"
 
+	parserport "github.com/jitctx/jitctx/internal/domain/port/parser"
 	profileport "github.com/jitctx/jitctx/internal/domain/port/profile"
 	specport "github.com/jitctx/jitctx/internal/domain/port/spec"
 )
@@ -107,6 +109,14 @@ type Deps struct {
 	// Backed by *fsscaffold.TestTemplateRegistry's RenderWithBundleTest method.
 	// EP04US-004.
 	BundleScaffoldTestRenderer specport.RenderBundleTestTemplatePort
+
+	// LanguageQueries satisfies both parser.LoadLanguageQueriesPort and
+	// parser.ListSupportedLanguagesPort. Backed by *bundledqueries.Registry.
+	// EP04US-005.
+	LanguageQueries interface {
+		parserport.LoadLanguageQueriesPort
+		parserport.ListSupportedLanguagesPort
+	}
 }
 
 func Wire(cfg config.Config, logger *slog.Logger) Deps {
@@ -121,7 +131,8 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	estimator := token.NewHeuristicEstimator()
 	declarativeClassifier := domspecsvc.NewDeclarativeClassifier()
 
-	profileBundleLoader := fsprofile.NewBundleLoader(logger)
+	languageQueries := tsbundled.NewRegistry(logger)
+	profileBundleLoader := fsprofile.NewBundleLoader(logger, languageQueries)
 	bundled := fsprofile.NewBundled()
 	profileResolver := fsprofile.NewResolver(profileBundleLoader, bundled, logger)
 	profileExtractor := fsprofile.NewExtractor()
@@ -250,5 +261,6 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 		BundleAuditRulesLoader:     bundleAuditRulesLoader, // EP04US-004
 		BundleScaffoldRenderer:     scaffoldRegistry,       // EP04US-004
 		BundleScaffoldTestRenderer: scaffoldTestRegistry,   // EP04US-004
+		LanguageQueries:            languageQueries,        // EP04US-005
 	}
 }

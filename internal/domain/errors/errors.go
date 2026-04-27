@@ -357,3 +357,37 @@ func (e *UnknownBundledProfileError) Error() string {
 func (e *UnknownBundledProfileError) Is(target error) bool {
 	return target == ErrBundledProfileNotFound
 }
+
+// EP04US-005 sentinels.
+var (
+	// ErrLanguageUnsupported is returned by parser.LoadLanguageQueriesPort
+	// (and surfaced by the profile bundle loader) when a profile.yaml
+	// declares a language id that has no bundled Tree-sitter query
+	// directory in the binary. Wraps ErrProfileInvalid for errors.Is
+	// matching so existing translators that only switch on
+	// ErrProfileInvalid continue to work.
+	ErrLanguageUnsupported = errors.New("language is not supported")
+)
+
+// LanguageUnsupportedError carries the offending language id and the
+// alphabetically-sorted list of supported ids so the user-facing message
+// is reproducible. Error() returns the literal pinned by the EP04US-005
+// .feature file:
+//
+//	language 'cobol' is not supported; available: go, java, python, typescript
+//
+// errors.Is(err, ErrLanguageUnsupported) and errors.Is(err, ErrProfileInvalid)
+// both return true.
+type LanguageUnsupportedError struct {
+	Language        string   // verbatim profile.yaml `language:` value (may be empty)
+	SupportedSorted []string // alphabetically sorted canonical ids
+}
+
+func (e *LanguageUnsupportedError) Error() string {
+	return fmt.Sprintf("language '%s' is not supported; available: %s",
+		e.Language, strings.Join(e.SupportedSorted, ", "))
+}
+
+func (e *LanguageUnsupportedError) Is(target error) bool {
+	return target == ErrLanguageUnsupported || errors.Is(target, ErrProfileInvalid)
+}

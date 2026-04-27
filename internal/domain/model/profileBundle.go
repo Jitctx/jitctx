@@ -40,6 +40,13 @@ type ProfileBundle struct {
 	// key. EP04US-004 introduces this field; the load-time mapper
 	// (bundleMapper.toBundleDomain) populates it.
 	RawAuditRules []AuditRule
+
+	// LanguageQueries is the bundled Tree-sitter query set the loader
+	// resolved from Profile.Language at load time. Nil when the profile
+	// did not declare a language (legacy schema). When non-nil, the
+	// pointer is shared across every ProfileBundle whose Profile.Language
+	// matches — the registry caches by language id (EP04US-005 Scenario 3).
+	LanguageQueries *LanguageQuerySet
 }
 
 // GetTemplate returns the bytes of the named template, keyed by

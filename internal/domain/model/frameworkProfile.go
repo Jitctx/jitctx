@@ -1,5 +1,7 @@
 package model
 
+import "github.com/jitctx/jitctx/internal/domain/vo"
+
 // ProfileSource identifies where a profile was loaded from. Populated
 // by the infrastructure adapter at load/detect time; the domain never
 // constructs ProfileSource values itself.
@@ -28,6 +30,14 @@ type FrameworkProfile struct {
 	Rules           []ProfileRule
 	QueryLang       string
 	Languages       []string
+
+	// Language is the singular, canonical EP-04 language id derived from
+	// the profile.yaml `language:` scalar. Empty when the profile pre-dates
+	// EP-04 (legacy `query_lang` / `languages:[…]` only). When non-empty,
+	// the bundled query registry has resolved it successfully — the
+	// loader fails with ErrLanguageUnsupported before reaching this
+	// assignment otherwise.
+	Language vo.Language
 }
 
 type ProfileDetect struct {

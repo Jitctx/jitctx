@@ -41,7 +41,7 @@ func newAuditCmdFor(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, 
 
 	bundleAuditRulesLoader := fsprofile.NewBundleAuditRulesAdapter()
 	bundled := fsprofile.NewBundled()
-	bundleLoader := fsprofile.NewBundleLoader(logger)
+	bundleLoader := fsprofile.NewBundleLoader(logger, nil)
 	resolver := fsprofile.NewResolver(bundleLoader, bundled, logger)
 
 	uc := appaudituc.New(

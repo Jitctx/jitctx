@@ -164,3 +164,43 @@ func TestSpecParseWarning_ErrorIncludesLineNumber(t *testing.T) {
 		})
 	}
 }
+
+// EP04US-005 — LanguageUnsupportedError tests.
+
+func TestLanguageUnsupportedError_ErrorString(t *testing.T) {
+	t.Parallel()
+	err := &domerr.LanguageUnsupportedError{
+		Language:        "cobol",
+		SupportedSorted: []string{"go", "java", "python", "typescript"},
+	}
+	require.Equal(t,
+		"language 'cobol' is not supported; available: go, java, python, typescript",
+		err.Error(),
+	)
+}
+
+func TestLanguageUnsupportedError_IsLanguageUnsupported(t *testing.T) {
+	t.Parallel()
+	err := &domerr.LanguageUnsupportedError{Language: "cobol"}
+	require.True(t, errors.Is(err, domerr.ErrLanguageUnsupported))
+}
+
+func TestLanguageUnsupportedError_IsProfileInvalid(t *testing.T) {
+	t.Parallel()
+	err := &domerr.LanguageUnsupportedError{Language: "cobol"}
+	require.True(t, errors.Is(err, domerr.ErrProfileInvalid))
+}
+
+func TestLanguageUnsupportedError_EmptyLanguage(t *testing.T) {
+	t.Parallel()
+	err := &domerr.LanguageUnsupportedError{
+		Language:        "",
+		SupportedSorted: []string{"java"},
+	}
+	// Confirms the format string handles the zero value without %q quoting.
+	require.Equal(t,
+		"language '' is not supported; available: java",
+		err.Error(),
+	)
+	require.True(t, strings.Contains(err.Error(), "''"))
+}

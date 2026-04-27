@@ -8,6 +8,7 @@ import (
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
 	"github.com/jitctx/jitctx/internal/domain/model"
+	"github.com/jitctx/jitctx/internal/domain/vo"
 )
 
 // toBundleDomain assembles a *model.ProfileBundle from a parsed bundleDTO and
@@ -74,6 +75,12 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte, logger *slog.Log
 		},
 		Rules: legacyRules,
 	}
+
+	// EP04US-005: derive the singular vo.Language for the bundled-query
+	// registry. ParseLanguage returns (zero, false) for unrecognised ids —
+	// the loader's attachLanguageQueries step is what surfaces unrecognised
+	// values as ErrLanguageUnsupported. We do NOT fail here.
+	profile.Language, _ = vo.ParseLanguage(lang)
 
 	rawTypes := make([]model.ProfileTypeDeclaration, 0, len(dto.Types))
 	for _, t := range dto.Types {

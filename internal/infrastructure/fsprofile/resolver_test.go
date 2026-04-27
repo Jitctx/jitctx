@@ -35,7 +35,7 @@ func makeUserProfileDir(t *testing.T, baseDir, profileName string) {
 // discard logger.
 func newTestResolver(t *testing.T) *fsprofile.Resolver {
 	t.Helper()
-	loader := fsprofile.NewBundleLoader(resolverDiscardLogger())
+	loader := fsprofile.NewBundleLoader(resolverDiscardLogger(), nil)
 	bundled := fsprofile.NewBundled()
 	return fsprofile.NewResolver(loader, bundled, resolverDiscardLogger())
 }

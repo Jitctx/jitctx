@@ -29,7 +29,7 @@ import (
 // to consult only the bundled embed for auto-detect paths.
 func buildScanFactoryWithLogger(profilesDir string, logger *slog.Logger) command.ScanUseCaseFactory {
 	resolver := fsprofile.NewResolver(
-		fsprofile.NewBundleLoader(logger),
+		fsprofile.NewBundleLoader(logger, nil),
 		fsprofile.NewBundled(),
 		logger,
 	)

@@ -80,7 +80,7 @@ func (h *captureHandler) hasMsg(msg string) bool {
 // locate user-dir profiles inside the project workDir.
 func buildResolvingScanFactory(profilesDir string, logger *slog.Logger) command.ScanUseCaseFactory {
 	resolver := fsprofile.NewResolver(
-		fsprofile.NewBundleLoader(logger),
+		fsprofile.NewBundleLoader(logger, nil),
 		fsprofile.NewBundled(),
 		logger,
 	)
