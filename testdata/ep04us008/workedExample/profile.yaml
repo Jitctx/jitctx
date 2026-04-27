@@ -1,0 +1,18 @@
+name: myProfile
+language: java
+types:
+  - id: service
+    template: service.java.tmpl
+    description: Application service implementing one input port.
+    classification:
+      - kind: class
+        has_annotation: Service
+audit_rules:
+  - id: service-naming
+    kind: interface_naming
+    severity: WARNING
+    description: 'Service classes should use the *Service suffix.'
+    suggestion: 'Rename {name} to end with Service'
+    params:
+      path_required: /service/
+      name_suffix: Service
