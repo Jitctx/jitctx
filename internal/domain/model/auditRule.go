@@ -27,6 +27,14 @@ const (
 	// params["exempt_paths"] (comma-joined list of forward-slash globs).
 	// PC01RF-002, PC01RF-003, PC01RF-008.
 	AuditKindForbiddenAnnotations AuditRuleKind = "forbidden_annotations"
+
+	// AuditKindMethodNaming enforces that every method carrying a configured
+	// trigger annotation (params["triggered_by"]) has a name matching a
+	// configured Go regex (params["name_pattern"]). The rule is scoped to
+	// files whose path contains params["path_scope"]. Per-rule path
+	// exemptions are honoured via params["exempt_paths"].
+	// PC01RF-004, PC01RF-009.
+	AuditKindMethodNaming AuditRuleKind = "method_naming"
 )
 
 // AuditSeverity is the severity badge attached to a violation.

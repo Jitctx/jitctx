@@ -892,6 +892,298 @@ func TestAuditEvaluator_ForbiddenAnnotations_MultipleFieldsOneOffending(t *testi
 		"violation message must name the offending field")
 }
 
+// ---------------------------------------------------------------------------
+// method_naming  (PC01US-005 / PC01RF-004 / PC01RF-009)
+// ---------------------------------------------------------------------------
+
+// methodNamingRule is the canonical rule fixture for PC01US-005:
+// "Test methods must follow the shouldX_whenY naming convention".
+func methodNamingRule() model.AuditRule {
+	return model.AuditRule{
+		ID:          "test-naming",
+		Kind:        model.AuditKindMethodNaming,
+		Severity:    model.AuditSeverityError,
+		Description: "Test method violates naming convention; name={name}, expected_pattern={expected_pattern}",
+		Suggestion:  "Rename {name} to match {expected_pattern}",
+		Params: map[string]string{
+			"path_scope":   "src/test/java/",
+			"triggered_by": "Test",
+			"name_pattern": "^should[A-Z].*_when[A-Z].*$",
+			"node_types":   "class_declaration",
+		},
+	}
+}
+
+func TestAuditEvaluator_MethodNaming_Compliant_NoViolation(t *testing.T) {
+	t.Parallel()
+	// AC1: a @Test method whose name matches the pattern must produce zero violations.
+
+	rule := methodNamingRule()
+	summary := model.JavaFileSummary{
+		Path: "src/test/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserServiceTest",
+				Methods: []model.JavaMethod{
+					{Name: "shouldReturnUser_whenIdExists", Annotations: []string{"Test"}, Line: 10},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "AC1: compliant @Test method must produce zero violations")
+}
+
+func TestAuditEvaluator_MethodNaming_NonCompliant_FlagsWithEvidence(t *testing.T) {
+	t.Parallel()
+	// AC2: a @Test method whose name does NOT match the pattern must produce
+	// exactly one violation; the message must contain the literal evidence
+	// "name=testFindUser, expected_pattern=^should[A-Z].*_when[A-Z].*$".
+
+	rule := methodNamingRule()
+	summary := model.JavaFileSummary{
+		Path: "src/test/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserServiceTest",
+				Methods: []model.JavaMethod{
+					{Name: "testFindUser", Annotations: []string{"Test"}, Line: 10},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "AC2: exactly one violation expected for non-compliant @Test method")
+	v := got[0]
+	require.Equal(t, rule.ID, v.RuleID)
+	require.Equal(t, model.AuditKindMethodNaming, v.Kind)
+	require.Equal(t, model.AuditSeverityError, v.Severity)
+	require.Equal(t, testModuleID, v.ModuleID)
+	require.Equal(t, summary.Path, v.FilePath)
+	require.Contains(t, v.Message, "name=testFindUser, expected_pattern=^should[A-Z].*_when[A-Z].*$",
+		"AC2: violation evidence must contain the method name and expected pattern verbatim")
+}
+
+func TestAuditEvaluator_MethodNaming_UntriggeredMethodIgnored(t *testing.T) {
+	t.Parallel()
+	// A method that does NOT carry the trigger annotation (@Test) must be
+	// ignored even when its name is non-compliant.
+
+	rule := methodNamingRule()
+	summary := model.JavaFileSummary{
+		Path: "src/test/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserServiceTest",
+				Methods: []model.JavaMethod{
+					// no "Test" annotation → must be skipped
+					{Name: "testFindUser", Annotations: []string{"Override"}, Line: 5},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "method without trigger annotation must not produce violations")
+}
+
+func TestAuditEvaluator_MethodNaming_OutsidePathScopeIgnored(t *testing.T) {
+	t.Parallel()
+	// A file whose path does not contain path_scope must produce zero violations
+	// even when a @Test method is non-compliant.
+
+	rule := methodNamingRule()
+	summary := model.JavaFileSummary{
+		// path_scope is "src/test/java/" — main sources are outside scope
+		Path: "src/main/java/com/acme/Foo.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Foo",
+				Methods: []model.JavaMethod{
+					{Name: "testFindUser", Annotations: []string{"Test"}, Line: 5},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "rule must not fire for files outside path_scope")
+}
+
+func TestAuditEvaluator_MethodNaming_RespectsExemptPaths(t *testing.T) {
+	t.Parallel()
+	// PC01RF-008: a file under **/legacy/** is exempt from the rule via
+	// exempt_paths even when the @Test method is non-compliant.
+
+	rule := methodNamingRule()
+	rule.Params["exempt_paths"] = "**/legacy/**"
+
+	summary := model.JavaFileSummary{
+		Path: "src/test/java/com/acme/legacy/OldTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "OldTest",
+				Methods: []model.JavaMethod{
+					{Name: "testFindUser", Annotations: []string{"Test"}, Line: 8},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "PC01RF-008: exempt_paths must suppress violations for legacy files")
+}
+
+func TestAuditEvaluator_MethodNaming_LinePropagation(t *testing.T) {
+	t.Parallel()
+	// The violation's Line must equal the method_declaration node line.
+
+	rule := methodNamingRule()
+	summary := model.JavaFileSummary{
+		Path: "src/test/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserServiceTest",
+				Methods: []model.JavaMethod{
+					{Name: "testFindUser", Annotations: []string{"Test"}, Line: 17},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "exactly one violation expected")
+	require.Equal(t, 17, got[0].Line, "violation Line must equal the method's line (17)")
+}
+
+func TestAuditEvaluator_MethodNaming_MalformedRuleEmitsNothing(t *testing.T) {
+	t.Parallel()
+	// Defensive: empty triggered_by, empty name_pattern, malformed regex, or
+	// missing path_scope each produce zero violations rather than panic.
+
+	summary := model.JavaFileSummary{
+		Path: "src/test/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserServiceTest",
+				Methods: []model.JavaMethod{
+					{Name: "testFindUser", Annotations: []string{"Test"}, Line: 5},
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		name   string
+		params map[string]string
+	}{
+		{
+			"empty-triggered-by",
+			map[string]string{
+				"path_scope":   "src/test/java/",
+				"triggered_by": "",
+				"name_pattern": "^should[A-Z].*_when[A-Z].*$",
+				"node_types":   "class_declaration",
+			},
+		},
+		{
+			"empty-name-pattern",
+			map[string]string{
+				"path_scope":   "src/test/java/",
+				"triggered_by": "Test",
+				"name_pattern": "",
+				"node_types":   "class_declaration",
+			},
+		},
+		{
+			"malformed-regex",
+			map[string]string{
+				"path_scope":   "src/test/java/",
+				"triggered_by": "Test",
+				"name_pattern": "[unclosed",
+				"node_types":   "class_declaration",
+			},
+		},
+		{
+			"missing-path-scope",
+			map[string]string{
+				"path_scope":   "",
+				"triggered_by": "Test",
+				"name_pattern": "^should[A-Z].*_when[A-Z].*$",
+				"node_types":   "class_declaration",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rule := model.AuditRule{
+				ID:       "broken",
+				Kind:     model.AuditKindMethodNaming,
+				Severity: model.AuditSeverityError,
+				Params:   tc.params,
+			}
+			got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+			require.Empty(t, got, "malformed rule must produce no violations; case: %s", tc.name)
+		})
+	}
+}
+
+func TestAuditEvaluator_MethodNaming_MultipleMethodsMixed(t *testing.T) {
+	t.Parallel()
+	// Three methods on one class:
+	//   1. shouldX_whenY + @Test   → compliant, no violation
+	//   2. testFoo     + @Test     → non-compliant, one violation
+	//   3. testBar     (no @Test)  → no trigger annotation, no violation
+	// Exactly one violation must be produced, pointing to "testFoo".
+
+	rule := methodNamingRule()
+	compliantMethod := model.JavaMethod{
+		Name: "shouldReturnUser_whenIdExists", Annotations: []string{"Test"}, Line: 10,
+	}
+	offendingMethod := model.JavaMethod{
+		Name: "testFoo", Annotations: []string{"Test"}, Line: 20,
+	}
+	noTriggerMethod := model.JavaMethod{
+		Name: "testBar", Annotations: nil, Line: 30,
+	}
+	summary := model.JavaFileSummary{
+		Path: "src/test/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserServiceTest",
+				Methods:  []model.JavaMethod{compliantMethod, offendingMethod, noTriggerMethod},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "exactly one violation expected — only testFoo is offending")
+	v := got[0]
+	require.Equal(t, offendingMethod.Line, v.Line,
+		"violation must point to testFoo's line")
+	require.Contains(t, v.Message, "testFoo",
+		"violation message must name the offending method")
+}
+
 // TestAuditEvaluator_MatchPathGlob verifies the matchPathGlob semantics
 // end-to-end through evalForbiddenAnnotations / pathExempt. The table covers
 // every case specified in plan §7.2.

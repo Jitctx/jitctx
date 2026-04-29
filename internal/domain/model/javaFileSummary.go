@@ -33,5 +33,8 @@ type JavaDeclaration struct {
 
 // JavaMethod represents a method extracted from a Java declaration.
 type JavaMethod struct {
-	Signature string // as defined in contract §3.4
+	Signature   string   // as defined in contract §3.4
+	Name        string   // simple method name (identifier), e.g. "testFindUser"
+	Annotations []string // simple annotation names, no leading @ (e.g. ["Override"]). Empty when not extracted.
+	Line        int      // 1-based line of the method_declaration node. 0 if unknown.
 }

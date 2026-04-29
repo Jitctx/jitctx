@@ -16,6 +16,7 @@ var knownAuditRuleKinds = map[model.AuditRuleKind]bool{
 	model.AuditKindFieldTypeLayerViolation: true,
 	model.AuditKindRequiredAnnotations:     true,
 	model.AuditKindForbiddenAnnotations:    true,
+	model.AuditKindMethodNaming:            true,
 }
 
 // knownAuditSeverities is the set of recognised AuditSeverity values.

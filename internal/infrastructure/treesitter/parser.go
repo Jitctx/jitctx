@@ -296,12 +296,40 @@ func extractMethods(bodyNode *sitter.Node, src []byte) []model.JavaMethod {
 		child := bodyNode.Child(i)
 		if child.Type() == nodeMethodDecl {
 			sig := buildMethodSignature(child, src)
-			if sig != "" {
-				methods = append(methods, model.JavaMethod{Signature: sig})
+			name := extractMethodName(child, src)
+			if sig == "" || name == "" {
+				continue
 			}
+			line := int(child.StartPoint().Row) + 1
+			var simpleAnnotations []string
+			for j := 0; j < int(child.ChildCount()); j++ {
+				mc := child.Child(j)
+				if mc.Type() == nodeModifiers {
+					simpleAnnotations, _ = extractAnnotations(mc, src)
+					break
+				}
+			}
+			methods = append(methods, model.JavaMethod{
+				Signature:   sig,
+				Name:        name,
+				Annotations: simpleAnnotations,
+				Line:        line,
+			})
 		}
 	}
 	return methods
+}
+
+// extractMethodName returns the first identifier child of a method_declaration node,
+// which is the method name. Returns "" if no identifier child is found.
+func extractMethodName(node *sitter.Node, src []byte) string {
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == nodeIdentifier {
+			return nodeText(child, src)
+		}
+	}
+	return ""
 }
 
 // buildMethodSignature reconstructs "ReturnType name(params)" from a method_declaration node.

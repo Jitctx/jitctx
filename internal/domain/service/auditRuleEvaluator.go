@@ -45,6 +45,8 @@ func (e *AuditEvaluator) EvaluateFile(
 			got = evalRequiredAnnotations(moduleID, summary, rule)
 		case model.AuditKindForbiddenAnnotations:
 			got = evalForbiddenAnnotations(moduleID, summary, rule)
+		case model.AuditKindMethodNaming:
+			got = evalMethodNaming(moduleID, summary, rule)
 		default:
 			// Unknown kinds are skipped — the loader is responsible for
 			// rejecting unknown kinds; the evaluator must be defensive.
@@ -613,4 +615,80 @@ func pathExempt(rule model.AuditRule, path string) bool {
 		}
 	}
 	return false
+}
+
+// evalMethodNaming — params:
+//
+//	"path_scope":    substring restricting which files this rule applies to
+//	                (e.g. "src/test/java/"). REQUIRED.
+//	"triggered_by": single annotation simple name (without "@") that must be
+//	                present on the method for the rule to evaluate it
+//	                (e.g. "Override"). REQUIRED.
+//	"name_pattern": Go regular expression the method name MUST match
+//	                (e.g. "^should[A-Z].*_when[A-Z].*$"). REQUIRED.
+//	"node_types":   optional comma-joined list of declaration node types the
+//	                rule applies to. Default "class_declaration".
+//	"exempt_paths": optional comma-joined list of forward-slash globs.
+//	                Any match exempts the file from this rule.
+//
+// The evaluator emits one violation per method that carries the trigger
+// annotation AND whose name does NOT match name_pattern. Substitution context:
+//
+//	{file}             — summary.Path
+//	{name}             — method.Name
+//	{expected_pattern} — params["name_pattern"]
+//	{triggered_by}     — params["triggered_by"]
+//
+// PC01RF-004 (method-scoped rules with regex name patterns), PC01RF-009
+// (evidence-rich messages).
+func evalMethodNaming(
+	moduleID string, summary model.JavaFileSummary, rule model.AuditRule,
+) []auditvo.AuditViolation {
+	pathScope := rule.Params["path_scope"]
+	triggeredBy := rule.Params["triggered_by"]
+	namePattern := rule.Params["name_pattern"]
+	if pathScope == "" || triggeredBy == "" || namePattern == "" {
+		return nil
+	}
+	if !strings.Contains(summary.Path, pathScope) {
+		return nil
+	}
+	if pathExempt(rule, summary.Path) {
+		return nil
+	}
+
+	re, err := regexp.Compile(namePattern)
+	if err != nil {
+		// Malformed regex — skip rule defensively; profile-validate should
+		// catch this at load time.
+		return nil
+	}
+
+	nodeTypes := splitNonEmpty(rule.Params["node_types"])
+	if len(nodeTypes) == 0 {
+		nodeTypes = []string{"class_declaration"}
+	}
+
+	var violations []auditvo.AuditViolation
+	for _, decl := range summary.Declarations {
+		if !nodeTypeAllowed(decl.NodeType, nodeTypes) {
+			continue
+		}
+		for _, method := range decl.Methods {
+			if !slices.Contains(method.Annotations, triggeredBy) {
+				continue
+			}
+			if re.MatchString(method.Name) {
+				continue
+			}
+			ctx := map[string]string{
+				"file":             summary.Path,
+				"name":             method.Name,
+				"expected_pattern": namePattern,
+				"triggered_by":     triggeredBy,
+			}
+			violations = append(violations, makeViolation(moduleID, summary, rule, method.Line, ctx))
+		}
+	}
+	return violations
 }

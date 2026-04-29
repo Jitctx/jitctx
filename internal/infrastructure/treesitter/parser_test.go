@@ -244,6 +244,40 @@ public class Helper {}`
 	require.Contains(t, summary.Imports, "java.util")
 }
 
+// TestParser_MethodAnnotationsNameLine verifies that extractMethods populates
+// JavaMethod.Name, JavaMethod.Annotations, and JavaMethod.Line from the AST.
+// R-001 mitigation: locks the producer contract for methods with trigger annotations.
+func TestParser_MethodAnnotationsNameLine(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.acme;
+
+import org.junit.jupiter.api.Test;
+
+public class UserServiceTest {
+
+    @Test
+    public void testFindUser() {
+    }
+}`
+	fsys := fstest.MapFS{
+		"UserServiceTest.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "UserServiceTest.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+	require.Len(t, decl.Methods, 1)
+	method := decl.Methods[0]
+	require.Equal(t, "testFindUser", method.Name)
+	require.Equal(t, []string{"Test"}, method.Annotations)
+	// Tree-sitter method_declaration includes the modifiers child (the @Test line),
+	// so StartPoint().Row is the annotation line (0-based row 6 → 1-based line 7).
+	require.Equal(t, 7, method.Line)
+}
+
 func TestParser_PartialParseSurfacesErrorAndKeepsValidDeclarations(t *testing.T) {
 	t.Parallel()
 
