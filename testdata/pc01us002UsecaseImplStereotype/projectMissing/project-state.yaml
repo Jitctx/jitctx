@@ -1,0 +1,19 @@
+schema_version: 2
+generated_at: 2026-04-29T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: application
+    path: src/main/java/com/acme/application/usecase
+    tags: []
+    contracts:
+      - name: FindUserUseCaseImpl
+        types:
+          - service
+        path: src/main/java/com/acme/application/usecase/FindUserUseCaseImpl.java
+        methods: []
+    dependencies: []
+contexts: []
