@@ -16,6 +16,10 @@ const (
 	nodeMarkerAnnotation = "marker_annotation"
 	nodeNormalAnnotation = "normal_annotation"
 
+	nodeArgumentList           = "argument_list"
+	nodeAnnotationArgumentList = "annotation_argument_list"
+	nodeElementValuePair       = "element_value_pair"
+
 	nodeIdentifier           = "identifier"
 	nodeTypeIdentifier       = "type_identifier"
 	nodeScopedIdentifier     = "scoped_identifier"

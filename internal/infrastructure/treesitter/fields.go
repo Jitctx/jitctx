@@ -147,7 +147,7 @@ func extractFieldDeclaration(node *sitter.Node, src []byte) []model.JavaField {
 	// Extract annotation simple names from the modifiers child (if any).
 	// The qualified names are discarded — only simple names are needed for the
 	// forbidden_annotations evaluator.
-	fieldAnnotations, _ := extractAnnotations(modifiersChild, src)
+	fieldAnnotations, _, _ := extractAnnotations(modifiersChild, src)
 
 	// Collect all variable_declarator names (handles multi-declarator fields).
 	var fields []model.JavaField

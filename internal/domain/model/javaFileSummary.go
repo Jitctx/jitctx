@@ -29,6 +29,23 @@ type JavaDeclaration struct {
 	Extends              []string     // superclass simple or qualified name (length 0 or 1)
 	Methods              []JavaMethod // class/interface-owned methods
 	Fields               []JavaField  // NEW — empty for non-class declarations and for classes with no fields
+
+	// AnnotationArgs maps simple annotation name → text of the first
+	// positional argument as it appears in source (including quotes for
+	// string literals and ".class" suffixes for class literals). Empty
+	// string when the annotation is a marker (no argument list). Keys are
+	// a subset of Annotations[].
+	//
+	// The map is keyed by SIMPLE annotation name (matching entries in
+	// Annotations[]). When the same simple annotation appears more than
+	// once on the same declaration (rare) the LAST occurrence wins.
+	//
+	// Empty map (or nil) when the language adapter did not extract
+	// arguments — evaluators must treat both nil and "" entries as
+	// "no argument captured".
+	//
+	// PC01RF-007.
+	AnnotationArgs map[string]string
 }
 
 // JavaMethod represents a method extracted from a Java declaration.

@@ -309,3 +309,82 @@ public class Bad {
 	}
 	require.True(t, found, "expected 'Good' class declaration to be present in partial parse output")
 }
+
+// TestParser_ClassWithExtendWithArg_PopulatesAnnotationArgs verifies that
+// JavaDeclaration.AnnotationArgs is populated for annotations that carry a
+// positional argument.  Locks PC01RF-007 Q2: string literals retain their
+// surrounding quotes and class literals retain the ".class" suffix.
+func TestParser_ClassWithExtendWithArg_PopulatesAnnotationArgs(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.acme;
+
+@ExtendWith(MockitoExtension.class)
+@DisplayName("User service tests")
+public class UserServiceTest {
+}`
+	fsys := fstest.MapFS{
+		"UserServiceTest.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "UserServiceTest.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+
+	require.Equal(t, "MockitoExtension.class", decl.AnnotationArgs["ExtendWith"],
+		"class literal arg must include the .class suffix verbatim")
+	require.Equal(t, `"User service tests"`, decl.AnnotationArgs["DisplayName"],
+		"string literal arg must preserve surrounding double-quotes")
+}
+
+// TestParser_ClassWithMarkerAnnotation_AnnotationArgEmpty verifies that a
+// marker annotation (no argument list) produces an empty string entry in
+// AnnotationArgs while still appearing in Annotations.
+func TestParser_ClassWithMarkerAnnotation_AnnotationArgEmpty(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.acme;
+
+@Deprecated
+public class Old {
+}`
+	fsys := fstest.MapFS{
+		"Old.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "Old.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+
+	require.Contains(t, decl.Annotations, "Deprecated",
+		"marker annotation must appear in Annotations slice")
+	require.Equal(t, "", decl.AnnotationArgs["Deprecated"],
+		"marker annotation must produce an empty-string arg entry")
+}
+
+// TestParser_ClassWithoutAnnotations_AnnotationArgsNilOrEmpty verifies that a
+// class with no annotations results in a nil or empty AnnotationArgs map.
+func TestParser_ClassWithoutAnnotations_AnnotationArgsNilOrEmpty(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `package com.acme;
+
+public class Plain {
+}`
+	fsys := fstest.MapFS{
+		"Plain.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "Plain.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+
+	require.Empty(t, decl.AnnotationArgs,
+		"class with no annotations must have nil or empty AnnotationArgs")
+}

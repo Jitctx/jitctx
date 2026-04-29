@@ -1184,6 +1184,248 @@ func TestAuditEvaluator_MethodNaming_MultipleMethodsMixed(t *testing.T) {
 		"violation message must name the offending method")
 }
 
+// ---------------------------------------------------------------------------
+// required_annotations — PC01US-006 / PC01RF-007 / PC01RF-009 (T6-G2)
+// ---------------------------------------------------------------------------
+
+// unitTestClassContractRule returns the canonical rule fixture for PC01US-006:
+// "Unit-test classes must declare @ExtendWith(MockitoExtension.class) and
+// @DisplayName". The Description embeds the {evidence} placeholder so the
+// substituted Message carries the evidence asserted by each AC scenario.
+func unitTestClassContractRule() model.AuditRule {
+	return model.AuditRule{
+		ID:          "unit-test-class-contract",
+		Kind:        model.AuditKindRequiredAnnotations,
+		Severity:    model.AuditSeverityError,
+		Description: "{name}: {evidence}",
+		Suggestion:  "Apply the contract to {name}",
+		Params: map[string]string{
+			"path_scope":      "src/main/java/",
+			"annotations":     "ExtendWith,DisplayName",
+			"expected_values": "ExtendWith=MockitoExtension.class",
+			"node_types":      "class_declaration",
+		},
+	}
+}
+
+func TestAuditEvaluator_RequiredAnnotations_UnitTestClassWithBothAnnotationsAndCorrectArgPasses(t *testing.T) {
+	t.Parallel()
+	// AC1: a class with both @ExtendWith(MockitoExtension.class) and
+	// @DisplayName inside path_scope must produce zero violations.
+
+	rule := unitTestClassContractRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "UserServiceTest",
+				Annotations: []string{"ExtendWith", "DisplayName"},
+				AnnotationArgs: map[string]string{
+					"ExtendWith":  "MockitoExtension.class",
+					"DisplayName": `"User service tests"`,
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "AC1: no violations expected when all annotations are present with correct arguments")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_UnitTestClassWrongExtensionArgFlagsViolation(t *testing.T) {
+	t.Parallel()
+	// AC2: a class with @ExtendWith(SpringExtension.class) instead of
+	// MockitoExtension.class must produce exactly one violation whose message
+	// contains the literal evidence substring mandated by AC2.
+
+	rule := unitTestClassContractRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "UserServiceTest",
+				Annotations: []string{"ExtendWith", "DisplayName"},
+				AnnotationArgs: map[string]string{
+					"ExtendWith":  "SpringExtension.class",
+					"DisplayName": `"User service tests"`,
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "AC2: exactly one violation expected for wrong ExtendWith argument")
+	require.Contains(t, got[0].Message,
+		"annotation=ExtendWith, expected_value=MockitoExtension.class, actual=SpringExtension.class",
+		"AC2: violation evidence must carry the annotation mismatch verbatim")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_UnitTestClassMissingDisplayNameFlagsViolation(t *testing.T) {
+	t.Parallel()
+	// AC3: a class that has @ExtendWith(MockitoExtension.class) but is missing
+	// @DisplayName must produce exactly one violation whose message contains
+	// the literal missing-set evidence mandated by AC3.
+
+	rule := unitTestClassContractRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "UserServiceTest",
+				Annotations: []string{"ExtendWith"},
+				AnnotationArgs: map[string]string{
+					"ExtendWith": "MockitoExtension.class",
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "AC3: exactly one violation expected for missing @DisplayName")
+	require.Contains(t, got[0].Message, "missing=[DisplayName]",
+		"AC3: violation evidence must surface the missing-annotation list")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_BothMissingAndMismatchEmitTwoOrderedViolations(t *testing.T) {
+	t.Parallel()
+	// PC01RNF-003: when a class both misses @DisplayName AND has a wrong
+	// @ExtendWith argument, two violations must be produced in deterministic
+	// order: missing-violation FIRST, then arg-mismatch in expected_values order.
+
+	rule := unitTestClassContractRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "UserServiceTest",
+				Annotations: []string{"ExtendWith"},
+				AnnotationArgs: map[string]string{
+					"ExtendWith": "SpringExtension.class",
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 2, "two violations expected: one for missing annotation, one for arg mismatch")
+	require.Contains(t, got[0].Message, "missing=[DisplayName]",
+		"PC01RNF-003: missing-violation must be emitted first")
+	require.Contains(t, got[1].Message,
+		"annotation=ExtendWith, expected_value=MockitoExtension.class, actual=SpringExtension.class",
+		"PC01RNF-003: arg-mismatch violation must follow the missing-violation")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_ExpectedValuesParsing_DuplicateKeyLastWins(t *testing.T) {
+	t.Parallel()
+	// Duplicate key in expected_values: last occurrence wins. When
+	// expected_values="Foo=A,Foo=B" the effective constraint is Foo=B.
+	// Tested via the public path: construct a rule, evaluate, assert the
+	// mismatch evidence shows expected_value=B.
+
+	rule := model.AuditRule{
+		ID:          "dup-key-test",
+		Kind:        model.AuditKindRequiredAnnotations,
+		Severity:    model.AuditSeverityError,
+		Description: "{name}: {evidence}",
+		Suggestion:  "Fix {name}",
+		Params: map[string]string{
+			"path_scope":      "src/main/java/",
+			"annotations":     "Foo",
+			"expected_values": "Foo=A,Foo=B",
+			"node_types":      "class_declaration",
+		},
+	}
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/SomeClass.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:       "class_declaration",
+				Name:           "SomeClass",
+				Annotations:    []string{"Foo"},
+				AnnotationArgs: map[string]string{"Foo": "A"},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "exactly one mismatch violation expected")
+	require.Contains(t, got[0].Message, "expected_value=B, actual=A",
+		"duplicate key: last occurrence (B) must win as the effective expected value")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_ExpectedValuesIgnoresMalformedPiece(t *testing.T) {
+	t.Parallel()
+	// A malformed piece in expected_values (no "=") is silently dropped.
+	// expected_values="Foo,Bar=B": "Foo" has no "=" and is ignored; only
+	// Bar=B is enforced. A class with Bar="X" must produce exactly one mismatch
+	// for Bar and no extra violation for Foo.
+
+	rule := model.AuditRule{
+		ID:          "malformed-piece-test",
+		Kind:        model.AuditKindRequiredAnnotations,
+		Severity:    model.AuditSeverityError,
+		Description: "{name}: {evidence}",
+		Suggestion:  "Fix {name}",
+		Params: map[string]string{
+			"path_scope":      "src/main/java/",
+			"annotations":     "Bar",
+			"expected_values": "Foo,Bar=B",
+			"node_types":      "class_declaration",
+		},
+	}
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/SomeClass.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:       "class_declaration",
+				Name:           "SomeClass",
+				Annotations:    []string{"Bar"},
+				AnnotationArgs: map[string]string{"Bar": "X"},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "exactly one violation expected — only Bar=B mismatch fires; malformed Foo piece is dropped")
+	require.Contains(t, got[0].Message, "expected_value=B, actual=X",
+		"mismatch evidence must reference Bar's expected value B and actual value X")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_NoExpectedValues_BehavesLikeBefore(t *testing.T) {
+	t.Parallel()
+	// Backward-compat guard (PC01US-001 / PC01RF-001): a rule with no
+	// expected_values param must continue to emit missing-set violations using
+	// the same {evidence} / {missing} format as before PC01US-006.
+
+	rule := requiredAnnotationsRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/domain/model/Order.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "Order",
+				Annotations: []string{"Getter", "Builder"},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "one violation expected: NoArgsConstructor and AllArgsConstructor are missing")
+	require.Contains(t, got[0].Message, "missing=[NoArgsConstructor,AllArgsConstructor]",
+		"backward compat: missing-set evidence must still use the [A,B] format")
+}
+
 // TestAuditEvaluator_MatchPathGlob verifies the matchPathGlob semantics
 // end-to-end through evalForbiddenAnnotations / pathExempt. The table covers
 // every case specified in plan §7.2.

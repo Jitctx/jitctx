@@ -128,16 +128,28 @@ func extractImport(node *sitter.Node, src []byte) string {
 	return ""
 }
 
-// extractAnnotations collects annotation names from a modifiers node.
-// It returns two parallel slices of equal length: simple names and fully-qualified names.
-// When the annotation was written as a simple name (e.g. @Entity), both slices carry
-// the same value. When written as a scoped name (e.g. @jakarta.persistence.Entity),
-// the simple slice carries "Entity" and the qualified slice carries
-// "jakarta.persistence.Entity". Malformed annotations are silently skipped to preserve
-// the invariant len(simple) == len(qualified).
-func extractAnnotations(node *sitter.Node, src []byte) (simple, qualified []string) {
+// extractAnnotations collects annotation names AND their first positional
+// argument text from a modifiers node. It returns three parallel slices of
+// equal length: simple names, fully-qualified names, and first-positional
+// argument texts.
+//
+// When the annotation was written as a simple name (e.g. @Entity), both
+// the simple and qualified slices carry the same value. When written as a
+// scoped name (e.g. @jakarta.persistence.Entity), the simple slice carries
+// "Entity" and the qualified slice carries "jakarta.persistence.Entity".
+//
+// args[i] is the verbatim source text of the first positional argument
+// (including quotes for string literals like "User service tests" and the
+// ".class" suffix for class literals like MockitoExtension.class). args[i]
+// is "" for marker annotations (no argument list) or empty argument lists.
+// For element-value pairs (e.g. @Foo(name="bar")) the VALUE child of the
+// first pair is captured.
+//
+// Malformed annotations are silently skipped to preserve the invariant
+// len(simple) == len(qualified) == len(args).
+func extractAnnotations(node *sitter.Node, src []byte) (simple, qualified, args []string) {
 	if node == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
@@ -145,13 +157,60 @@ func extractAnnotations(node *sitter.Node, src []byte) (simple, qualified []stri
 		case nodeAnnotation, nodeMarkerAnnotation, nodeNormalAnnotation:
 			raw := findAnnotationNameChild(child, src)
 			if raw == "" {
-				continue // malformed — skip to keep invariant len(simple) == len(qualified)
+				continue // malformed — skip to keep invariants
 			}
 			simple = append(simple, terminalSegment(raw))
 			qualified = append(qualified, raw)
+			args = append(args, findFirstPositionalArg(child, src))
 		}
 	}
 	return
+}
+
+// findFirstPositionalArg returns the verbatim source text of the first
+// positional argument of an annotation node, or "" when the annotation is
+// a marker or its argument_list is empty. For an element_value_pair first
+// child, the VALUE child's text is returned.
+//
+// The Tree-sitter Java grammar uses "annotation_argument_list" (not
+// "argument_list") as the direct child of an annotation node. Both spellings
+// are accepted for forward-compatibility. Class literals
+// (MockitoExtension.class) and string literals ("User service tests") are
+// returned verbatim including their delimiters.
+func findFirstPositionalArg(ann *sitter.Node, src []byte) string {
+	for j := 0; j < int(ann.ChildCount()); j++ {
+		c := ann.Child(j)
+		ct := c.Type()
+		if ct != nodeArgumentList && ct != nodeAnnotationArgumentList {
+			continue
+		}
+		for k := 0; k < int(c.ChildCount()); k++ {
+			gc := c.Child(k)
+			t := gc.Type()
+			// Skip punctuation children: "(", ")", ",".
+			if t == "(" || t == ")" || t == "," {
+				continue
+			}
+			if t == nodeElementValuePair {
+				// Descend: capture the VALUE side. element_value_pair
+				// is "identifier = value" — the last non-"=" child.
+				for m := int(gc.ChildCount()) - 1; m >= 0; m-- {
+					vc := gc.Child(m)
+					vt := vc.Type()
+					if vt == "=" || vt == nodeIdentifier {
+						continue
+					}
+					return nodeText(vc, src)
+				}
+				return ""
+			}
+			// class_literal: e.g. MockitoExtension.class — return verbatim.
+			// string_literal: e.g. "User service tests" — return verbatim.
+			// For any other expression node, return the full text.
+			return nodeText(gc, src)
+		}
+	}
+	return ""
 }
 
 // findAnnotationNameChild returns the source text of the first
@@ -185,7 +244,9 @@ func extractClassDeclaration(node *sitter.Node, src []byte) model.JavaDeclaratio
 		child := node.Child(i)
 		switch child.Type() {
 		case nodeModifiers:
-			decl.Annotations, decl.QualifiedAnnotations = extractAnnotations(child, src)
+			var args []string
+			decl.Annotations, decl.QualifiedAnnotations, args = extractAnnotations(child, src)
+			decl.AnnotationArgs = annotationArgsMap(decl.Annotations, args)
 		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
 		case nodeSuperclass:
@@ -214,7 +275,9 @@ func extractInterfaceDeclaration(node *sitter.Node, src []byte) model.JavaDeclar
 		child := node.Child(i)
 		switch child.Type() {
 		case nodeModifiers:
-			decl.Annotations, decl.QualifiedAnnotations = extractAnnotations(child, src)
+			var args []string
+			decl.Annotations, decl.QualifiedAnnotations, args = extractAnnotations(child, src)
+			decl.AnnotationArgs = annotationArgsMap(decl.Annotations, args)
 		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
 		case nodeExtendsInterfaces:
@@ -233,7 +296,9 @@ func extractEnumDeclaration(node *sitter.Node, src []byte) model.JavaDeclaration
 		child := node.Child(i)
 		switch child.Type() {
 		case nodeModifiers:
-			decl.Annotations, decl.QualifiedAnnotations = extractAnnotations(child, src)
+			var args []string
+			decl.Annotations, decl.QualifiedAnnotations, args = extractAnnotations(child, src)
+			decl.AnnotationArgs = annotationArgsMap(decl.Annotations, args)
 		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
 		case nodeSuperInterfaces:
@@ -250,7 +315,9 @@ func extractRecordDeclaration(node *sitter.Node, src []byte) model.JavaDeclarati
 		child := node.Child(i)
 		switch child.Type() {
 		case nodeModifiers:
-			decl.Annotations, decl.QualifiedAnnotations = extractAnnotations(child, src)
+			var args []string
+			decl.Annotations, decl.QualifiedAnnotations, args = extractAnnotations(child, src)
+			decl.AnnotationArgs = annotationArgsMap(decl.Annotations, args)
 		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
 		case nodeSuperInterfaces:
@@ -258,6 +325,20 @@ func extractRecordDeclaration(node *sitter.Node, src []byte) model.JavaDeclarati
 		}
 	}
 	return decl
+}
+
+// annotationArgsMap pairs annotation simple names to their first-positional
+// argument text. Returns nil when both slices are empty so a JavaDeclaration
+// with no annotations keeps AnnotationArgs == nil (rather than an empty map).
+func annotationArgsMap(simple, args []string) map[string]string {
+	if len(simple) == 0 || len(args) != len(simple) {
+		return nil
+	}
+	m := make(map[string]string, len(simple))
+	for i, name := range simple {
+		m[name] = args[i]
+	}
+	return m
 }
 
 // extractTypeList extracts type names from a super_interfaces or extends_interfaces node.
@@ -305,7 +386,7 @@ func extractMethods(bodyNode *sitter.Node, src []byte) []model.JavaMethod {
 			for j := 0; j < int(child.ChildCount()); j++ {
 				mc := child.Child(j)
 				if mc.Type() == nodeModifiers {
-					simpleAnnotations, _ = extractAnnotations(mc, src)
+					simpleAnnotations, _, _ = extractAnnotations(mc, src)
 					break
 				}
 			}

@@ -265,27 +265,64 @@ func evalFieldTypeLayerViolation(
 
 // evalRequiredAnnotations — params:
 //
-//	"path_scope":    substring restricting which files this rule applies to
-//	                 (e.g. "/domain/model/"). REQUIRED.
-//	"annotations":   comma-joined list of annotation simple names (without
-//	                 the leading "@") that must ALL be present on every
-//	                 matching declaration. REQUIRED, non-empty.
-//	"node_types":    optional comma-joined list of declaration node types
-//	                 the rule applies to. Default "class_declaration". Use
-//	                 "*" or empty to skip the node-type filter.
+//	"path_scope":      substring restricting which files this rule applies to
+//	                   (e.g. "src/main/java/"). REQUIRED.
+//	"annotations":     comma-joined list of annotation simple names (without
+//	                   the leading "@") that must ALL be present on every
+//	                   matching declaration. REQUIRED, non-empty. Order is
+//	                   preserved and used to derive deterministic
+//	                   "missing=[...]" evidence.
+//	"expected_values": OPTIONAL comma-joined list of "Annotation=Value" pairs
+//	                   (e.g. "ExtendWith=MockitoExtension.class"). For each
+//	                   pair, when the annotation IS present on a matching
+//	                   declaration, the evaluator compares the text of its
+//	                   first positional argument (decl.AnnotationArgs[ann])
+//	                   against the right-hand value. The comparison is exact
+//	                   string equality. A mismatch emits ONE additional
+//	                   violation per pair, separate from the missing-set
+//	                   violation. PC01RF-007.
+//	                   Parsing rules:
+//	                     - splits on "," only;
+//	                     - each piece is split on the FIRST "=";
+//	                     - whitespace around the annotation name AND value is
+//	                       trimmed;
+//	                     - a piece without "=" is ignored (defensive);
+//	                     - duplicate keys: LAST occurrence wins (deterministic
+//	                       on a given input string).
+//	                   Limitation: argument values containing commas are NOT
+//	                   supported. Profile authors needing such values must
+//	                   wait for a future-extension key (out of scope; Q7).
+//	"node_types":      optional comma-joined list of declaration node types
+//	                   the rule applies to. Default "class_declaration". Use
+//	                   "*" or empty to skip the node-type filter.
 //
-// The evaluator is language-neutral: it inspects only generic
-// JavaDeclaration.Annotations entries (simple names extracted by the
-// language adapter). It emits one violation per declaration that is
-// missing at least one required annotation. The substitution context
-// always populates:
+// Substitution context (per emitted violation):
 //
-//	{required} — comma-joined required annotations, in the order declared
-//	{missing}  — "[A,B,...]" of the subset NOT present on the declaration
-//	{name}     — the declaration's simple name
 //	{file}     — summary.Path
+//	{name}     — declaration simple name
+//	{required} — comma-joined params["annotations"] (verbatim, in order)
+//	{evidence} — for the missing-violation: "missing=[A,B,...]" subset
+//	             NOT present, ordered by params["annotations"];
+//	           — for an arg-mismatch violation: literal
+//	             "annotation=<ann>, expected_value=<expected>, actual=<actual>"
+//	             where <actual> is decl.AnnotationArgs[<ann>] (may be "").
+//	{missing}  — same as {evidence} for the missing-violation (backward
+//	             compat for templates that still use {missing}); not
+//	             populated for arg-mismatch violations.
 //
-// PC01RF-001 (all-of semantics) and PC01RF-009 (evidence-rich messages).
+// Determinism (PC01RNF-003):
+//   - "expected_values" is parsed into an ORDERED slice of pairs in the
+//     order the pairs appear in the input string.
+//   - The evaluator iterates that ordered slice; it never iterates a Go
+//     map for emit ordering.
+//   - When BOTH a missing-violation AND one or more arg-mismatch
+//     violations apply to the same declaration, the missing violation is
+//     emitted FIRST, then arg-mismatch violations in the
+//     "expected_values" order.
+//
+// PC01RF-001 (all-of presence), PC01RF-007 (argument matching),
+// PC01RNF-001 (engine language-neutrality — no Java/Spring identifiers
+// referenced here), PC01RF-009 (evidence-rich messages).
 func evalRequiredAnnotations(
 	moduleID string, summary model.JavaFileSummary, rule model.AuditRule,
 ) []auditvo.AuditViolation {
@@ -306,22 +343,47 @@ func evalRequiredAnnotations(
 		nodeTypes = []string{"class_declaration"}
 	}
 
+	expected := parseExpectedValues(rule.Params["expected_values"])
+
 	var violations []auditvo.AuditViolation
 	for _, decl := range summary.Declarations {
 		if !nodeTypeAllowed(decl.NodeType, nodeTypes) {
 			continue
 		}
 		missing := missingAnnotations(decl.Annotations, required)
-		if len(missing) == 0 {
-			continue
+		if len(missing) > 0 {
+			missingEvidence := "missing=[" + strings.Join(missing, ",") + "]"
+			ctx := map[string]string{
+				"file":     summary.Path,
+				"name":     decl.Name,
+				"required": strings.Join(required, ","),
+				"evidence": missingEvidence,
+				// backward compat: {missing} keeps the same value as {evidence}
+				// for templates authored before PC01US-006.
+				"missing": missingEvidence,
+			}
+			violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctx))
 		}
-		ctx := map[string]string{
-			"file":     summary.Path,
-			"name":     decl.Name,
-			"required": strings.Join(required, ","),
-			"missing":  "[" + strings.Join(missing, ",") + "]",
+		for _, pair := range expected {
+			if !slices.Contains(decl.Annotations, pair.Annotation) {
+				// Already covered by missing-violation (or not required); skip.
+				continue
+			}
+			actual := decl.AnnotationArgs[pair.Annotation]
+			if actual == pair.Expected {
+				continue
+			}
+			mismatchEvidence := "annotation=" + pair.Annotation +
+				", expected_value=" + pair.Expected +
+				", actual=" + actual
+			ctxMm := map[string]string{
+				"file":     summary.Path,
+				"name":     decl.Name,
+				"required": strings.Join(required, ","),
+				"evidence": mismatchEvidence,
+			}
+			violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctxMm))
 		}
-		violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctx))
 	}
 	return violations
 }
@@ -615,6 +677,55 @@ func pathExempt(rule model.AuditRule, path string) bool {
 		}
 	}
 	return false
+}
+
+// expectedValuePair is the parsed form of one "Annotation=Value" entry from
+// rule.Params["expected_values"]. The slice form is REQUIRED for
+// deterministic iteration (PC01RNF-003); a Go map's iteration order would
+// reorder violations between runs.
+type expectedValuePair struct {
+	Annotation string // simple name (left side, trimmed)
+	Expected   string // verbatim value text (right side, trimmed)
+}
+
+// parseExpectedValues splits a comma-joined list of "Ann=Value" pairs into
+// an ordered slice. Splits on "," then on FIRST "=". Pieces without "=" are
+// skipped. Whitespace around both sides is trimmed. Duplicate annotations
+// preserve the LAST occurrence's value (deterministic on a given input).
+// Returns nil for an empty input. See §8 Q4 / Q7 for limitations.
+func parseExpectedValues(s string) []expectedValuePair {
+	if s == "" {
+		return nil
+	}
+	pieces := strings.Split(s, ",")
+	// Use a map to track the last seen value per annotation key, and a
+	// separate slice to track the order of FIRST appearance.
+	order := make([]string, 0, len(pieces))
+	last := make(map[string]string, len(pieces))
+	for _, piece := range pieces {
+		annRaw, valRaw, ok := strings.Cut(piece, "=")
+		if !ok {
+			// No "=" — malformed piece; skip defensively.
+			continue
+		}
+		ann := strings.TrimSpace(annRaw)
+		val := strings.TrimSpace(valRaw)
+		if ann == "" {
+			continue
+		}
+		if _, seen := last[ann]; !seen {
+			order = append(order, ann)
+		}
+		last[ann] = val
+	}
+	if len(order) == 0 {
+		return nil
+	}
+	out := make([]expectedValuePair, 0, len(order))
+	for _, ann := range order {
+		out = append(out, expectedValuePair{Annotation: ann, Expected: last[ann]})
+	}
+	return out
 }
 
 // evalMethodNaming — params:
