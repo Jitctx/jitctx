@@ -12,6 +12,11 @@ import (
 
 type configFileDTO struct {
 	PlansDir string `yaml:"plans_dir"`
+	// Audit is decoded as a free-form node so that EP03US-008's
+	// `audit:` block (consumed by the audit use case via fsconfig) does
+	// not trip the binary-launch strict decode. The binary-launch loader
+	// itself does not interpret these keys.
+	Audit yaml.Node `yaml:"audit"`
 }
 
 func Load() (Config, error) {

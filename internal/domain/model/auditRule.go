@@ -12,6 +12,13 @@ const (
 	AuditKindInterfaceNaming         AuditRuleKind = "interface_naming"
 	AuditKindForbiddenImport         AuditRuleKind = "forbidden_import"
 	AuditKindFieldTypeLayerViolation AuditRuleKind = "field_type_layer_violation"
+	// AuditKindRequiredAnnotations enforces all-of semantics: the rule
+	// declares a list of annotation simple names that MUST be present on
+	// every matching declaration. The evaluator emits one violation per
+	// declaration that is missing at least one of them, with the missing
+	// subset surfaced as evidence under the {missing} substitution token.
+	// PC01RF-001 (proposal-changes-01).
+	AuditKindRequiredAnnotations AuditRuleKind = "required_annotations"
 )
 
 // AuditSeverity is the severity badge attached to a violation.

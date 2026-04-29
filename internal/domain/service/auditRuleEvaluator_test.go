@@ -430,3 +430,186 @@ func assertViolationType(t *testing.T, v auditvo.AuditViolation, kind model.Audi
 	require.Equal(t, kind, v.Kind)
 	require.Equal(t, severity, v.Severity)
 }
+
+// ---------------------------------------------------------------------------
+// required_annotations  (PC01US-001 / PC01RF-001 / PC01RF-009)
+// ---------------------------------------------------------------------------
+
+// requiredAnnotationsRule is the canonical rule fixture for PC01US-001:
+// "Domain model classes must declare @Getter, @Builder, @NoArgsConstructor,
+// @AllArgsConstructor together". The Description embeds the {missing}
+// placeholder so the substituted Message carries the evidence that
+// PC01US-001 Scenario 2 asserts on.
+func requiredAnnotationsRule() model.AuditRule {
+	return model.AuditRule{
+		ID:          "domain-model-lombok",
+		Kind:        model.AuditKindRequiredAnnotations,
+		Severity:    model.AuditSeverityError,
+		Description: "Domain model {name} must declare all of [{required}]; missing={missing}",
+		Suggestion:  "Add the missing annotation(s) to {name}: {missing}",
+		Params: map[string]string{
+			"path_scope":  "/domain/model/",
+			"annotations": "Getter,Builder,NoArgsConstructor,AllArgsConstructor",
+		},
+	}
+}
+
+func TestAuditEvaluator_RequiredAnnotations_DomainModelWithAllAnnotationsPasses(t *testing.T) {
+	t.Parallel()
+	// PC01US-001 Scenario 1: a domain model declaring all four required
+	// annotations produces zero violations.
+
+	rule := requiredAnnotationsRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/domain/model/Order.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Order",
+				Annotations: []string{
+					"Getter", "Builder", "NoArgsConstructor", "AllArgsConstructor",
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "no violation expected when all required annotations are present")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_DomainModelMissingOneFailsWithEvidence(t *testing.T) {
+	t.Parallel()
+	// PC01US-001 Scenario 2: a domain model missing @AllArgsConstructor
+	// produces exactly one violation whose evidence contains
+	// "missing=[AllArgsConstructor]".
+
+	rule := requiredAnnotationsRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/domain/model/Order.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Order",
+				Annotations: []string{
+					"Getter", "Builder", "NoArgsConstructor",
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "exactly one violation expected when one annotation is missing")
+	v := got[0]
+	require.Equal(t, rule.ID, v.RuleID)
+	require.Equal(t, model.AuditKindRequiredAnnotations, v.Kind)
+	require.Equal(t, model.AuditSeverityError, v.Severity)
+	require.Equal(t, summary.Path, v.FilePath)
+	require.Contains(t, v.Message, "missing=[AllArgsConstructor]",
+		"PC01US-001 Scenario 2: violation evidence must surface the missing-annotation list")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_OutsideScopeIsIgnored(t *testing.T) {
+	t.Parallel()
+	// Defensive: a class outside path_scope is ignored even when missing
+	// annotations. Ensures the rule does not produce false positives in
+	// unrelated layers.
+
+	rule := requiredAnnotationsRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/usecase/FindOrder.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "FindOrder",
+				Annotations: []string{"Service"},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "rule must not fire outside path_scope")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_MissingMultipleSurfacesAllInOrder(t *testing.T) {
+	t.Parallel()
+	// PC01RF-009: evidence-rich violation messages. When several
+	// annotations are missing, all of them must be enumerated under
+	// {missing} preserving the order declared in params.annotations.
+
+	rule := requiredAnnotationsRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/domain/model/Customer.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "Customer",
+				Annotations: []string{"Getter"}, // missing Builder, NoArgsConstructor, AllArgsConstructor
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1)
+	require.Contains(t, got[0].Message,
+		"missing=[Builder,NoArgsConstructor,AllArgsConstructor]",
+		"missing list must preserve the order of params.annotations")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_MalformedRuleEmitsNothing(t *testing.T) {
+	t.Parallel()
+	// Defensive: an empty annotations param is rejected by the loader at
+	// profile-load time (PC01RF-011); the runtime evaluator must remain
+	// silent rather than emit spurious violations.
+
+	cases := []struct {
+		name   string
+		params map[string]string
+	}{
+		{"empty-annotations", map[string]string{"path_scope": "/domain/model/", "annotations": ""}},
+		{"missing-path-scope", map[string]string{"path_scope": "", "annotations": "Getter"}},
+	}
+
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/domain/model/Order.java",
+		Declarations: []model.JavaDeclaration{
+			{NodeType: "class_declaration", Name: "Order", Annotations: nil},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rule := model.AuditRule{
+				ID:       "broken",
+				Kind:     model.AuditKindRequiredAnnotations,
+				Severity: model.AuditSeverityError,
+				Params:   tc.params,
+			}
+			got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+			require.Empty(t, got)
+		})
+	}
+}
+
+func TestAuditEvaluator_RequiredAnnotations_NonClassDeclarationIgnoredByDefault(t *testing.T) {
+	t.Parallel()
+	// Default node_types is "class_declaration"; an interface in the same
+	// scope MUST NOT trigger the rule unless node_types is widened.
+
+	rule := requiredAnnotationsRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/domain/model/OrderRepo.java",
+		Declarations: []model.JavaDeclaration{
+			{NodeType: "interface_declaration", Name: "OrderRepo", Annotations: nil},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "interfaces must be skipped by default node_types filter")
+}
