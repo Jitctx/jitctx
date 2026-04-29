@@ -1,0 +1,19 @@
+schema_version: 2
+generated_at: 2026-04-29T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: com.acme
+    path: src/main/java/com/acme
+    tags: []
+    contracts:
+      - name: Foo
+        types:
+          - service
+        path: src/main/java/com/acme/Foo.java
+        methods: []
+    dependencies: []
+contexts: []

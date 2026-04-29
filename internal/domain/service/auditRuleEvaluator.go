@@ -1,6 +1,7 @@
 package service
 
 import (
+	stdpath "path"
 	"regexp"
 	"slices"
 	"strings"
@@ -42,6 +43,8 @@ func (e *AuditEvaluator) EvaluateFile(
 			got = evalFieldTypeLayerViolation(moduleID, summary, rule)
 		case model.AuditKindRequiredAnnotations:
 			got = evalRequiredAnnotations(moduleID, summary, rule)
+		case model.AuditKindForbiddenAnnotations:
+			got = evalForbiddenAnnotations(moduleID, summary, rule)
 		default:
 			// Unknown kinds are skipped — the loader is responsible for
 			// rejecting unknown kinds; the evaluator must be defensive.
@@ -74,16 +77,13 @@ func evalAnnotationPathMismatch(
 
 	var violations []auditvo.AuditViolation
 	for _, decl := range summary.Declarations {
-		for _, ann := range decl.Annotations {
-			if ann == annotation {
-				ctx := map[string]string{
-					"file":          summary.Path,
-					"name":          decl.Name,
-					"path_required": pathRequired,
-				}
-				violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctx))
-				break
+		if slices.Contains(decl.Annotations, annotation) {
+			ctx := map[string]string{
+				"file":          summary.Path,
+				"name":          decl.Name,
+				"path_required": pathRequired,
 			}
+			violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctx))
 		}
 	}
 	return violations
@@ -418,4 +418,199 @@ func matchGlob(pattern, candidate string) bool {
 		return strings.HasSuffix(candidate, pattern[1:])
 	}
 	return pattern == candidate
+}
+
+// evalForbiddenAnnotations — params:
+//
+//	"path_scope":   substring restricting which files this rule applies to
+//	               (e.g. "/src/main/java/"). REQUIRED.
+//	"annotations":  comma-joined list of forbidden annotation simple names
+//	               (without the leading "@"), e.g. "Autowired". The rule
+//	               fires when ANY listed annotation is present on a
+//	               matching target. REQUIRED, non-empty.
+//	"target":       one of "class" | "field". Default "class".
+//	               - "class"  → inspect decl.Annotations on every
+//	                            JavaDeclaration whose NodeType is in
+//	                            node_types (default class_declaration).
+//	               - "field"  → inspect annotations on every
+//	                            JavaField inside every JavaDeclaration
+//	                            whose NodeType is in node_types.
+//	"node_types":   optional comma-joined list of declaration node types.
+//	               Default "class_declaration". "*" matches any.
+//	"exempt_paths": optional comma-joined list of forward-slash globs.
+//	               Each glob is matched against summary.Path with
+//	               matchPathGlob. Any match exempts the file from this
+//	               rule only.
+//
+// Substitution context:
+//
+//	{file}     — summary.Path
+//	{name}     — declaration simple name (target=class) OR field name (target=field)
+//	{forbidden} — comma-joined params["annotations"] (verbatim, in order)
+//	{found}    — "[A,B,...]" of the subset of forbidden annotations actually
+//	             present on the offending target (deterministic, in the
+//	             order the annotations were declared in params).
+//
+// Violation Line:
+//
+//   - target=class  → 0 (class line is not currently captured).
+//   - target=field  → field.Line (1-based; PC01US-004 Scenario 1 asserts
+//     "violation reported on the field's line").
+//
+// PC01RF-002 / PC01RF-003 / PC01RF-008 / PC01RF-009.
+func evalForbiddenAnnotations(
+	moduleID string, summary model.JavaFileSummary, rule model.AuditRule,
+) []auditvo.AuditViolation {
+	pathScope := rule.Params["path_scope"]
+	forbidden := splitNonEmpty(rule.Params["annotations"])
+	if pathScope == "" || len(forbidden) == 0 {
+		return nil
+	}
+	if !strings.Contains(summary.Path, pathScope) {
+		return nil
+	}
+	if pathExempt(rule, summary.Path) {
+		return nil
+	}
+
+	nodeTypes := splitNonEmpty(rule.Params["node_types"])
+	if len(nodeTypes) == 0 {
+		nodeTypes = []string{"class_declaration"}
+	}
+
+	target := rule.Params["target"]
+	if target == "" {
+		target = "class"
+	}
+
+	forbiddenRaw := rule.Params["annotations"]
+
+	var violations []auditvo.AuditViolation
+	for _, decl := range summary.Declarations {
+		if !nodeTypeAllowed(decl.NodeType, nodeTypes) {
+			continue
+		}
+		switch target {
+		case "class":
+			found := intersectAnnotations(decl.Annotations, forbidden)
+			if len(found) > 0 {
+				ctx := map[string]string{
+					"file":      summary.Path,
+					"name":      decl.Name,
+					"forbidden": forbiddenRaw,
+					"found":     "[" + strings.Join(found, ",") + "]",
+				}
+				violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctx))
+			}
+		case "field":
+			for _, field := range decl.Fields {
+				found := intersectAnnotations(field.Annotations, forbidden)
+				if len(found) > 0 {
+					ctx := map[string]string{
+						"file":      summary.Path,
+						"name":      field.Name,
+						"forbidden": forbiddenRaw,
+						"found":     "[" + strings.Join(found, ",") + "]",
+					}
+					violations = append(violations, makeViolation(moduleID, summary, rule, field.Line, ctx))
+				}
+			}
+		default:
+			// Unknown target — defensive, no violations.
+		}
+	}
+	return violations
+}
+
+// intersectAnnotations returns the subset of forbidden entries that appear in
+// declared, preserving the order of forbidden (deterministic output per
+// PC01RNF-003).
+func intersectAnnotations(declared, forbidden []string) []string {
+	have := make(map[string]struct{}, len(declared))
+	for _, a := range declared {
+		have[a] = struct{}{}
+	}
+	var found []string
+	for _, f := range forbidden {
+		if _, ok := have[f]; ok {
+			found = append(found, f)
+		}
+	}
+	return found
+}
+
+// matchPathGlob reports whether path matches the forward-slash glob pattern.
+// Supported syntax:
+//
+//	"/literal/segment/"         — substring match (no glob meta-chars).
+//	"*foo" / "foo*" / "*foo*"   — single-segment globs (path.Match style).
+//	"**/seg/**" / "**/seg"       — "**" matches zero or more "/"-separated
+//	                               segments (including none).
+//
+// Implementation: split pattern and path on "/"; walk both concurrently with
+// "**" consuming any number of path segments. No regex compilation;
+// deterministic; allocation-free in the common case.
+//
+// Returns (matched bool). Never returns an error: a malformed pattern is
+// treated as "no match" so a profile typo never panics the run.
+func matchPathGlob(pattern, path string) bool {
+	patSegs := strings.Split(pattern, "/")
+	pathSegs := strings.Split(path, "/")
+	return matchSegments(patSegs, pathSegs)
+}
+
+// matchSegments is the recursive worker for matchPathGlob.
+func matchSegments(patSegs, pathSegs []string) bool {
+	for len(patSegs) > 0 {
+		pat := patSegs[0]
+		if pat == "**" {
+			patSegs = patSegs[1:]
+			if len(patSegs) == 0 {
+				// "**" at end matches zero or more remaining segments.
+				return true
+			}
+			// Try consuming 0..N path segments before the next pattern segment.
+			for i := 0; i <= len(pathSegs); i++ {
+				if matchSegments(patSegs, pathSegs[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		// Non-"**" segment: requires at least one path segment.
+		if len(pathSegs) == 0 {
+			return false
+		}
+		ok, err := stdpathMatch(pat, pathSegs[0])
+		if err != nil || !ok {
+			return false
+		}
+		patSegs = patSegs[1:]
+		pathSegs = pathSegs[1:]
+	}
+	return len(pathSegs) == 0
+}
+
+// stdpathMatch delegates to path.Match for single-segment glob matching.
+// Returns (false, nil) for an empty pattern so callers can treat it as
+// no-match without propagating errors.
+func stdpathMatch(pattern, name string) (bool, error) {
+	if pattern == "" {
+		return name == "", nil
+	}
+	return stdpath.Match(pattern, name)
+}
+
+// pathExempt reports whether the given path matches any glob in
+// rule.Params["exempt_paths"] (comma-joined). Empty/missing key returns false.
+// Used by evalForbiddenAnnotations; reusable for future per-rule-exemption
+// evaluators (PC01RF-008 cross-cutting).
+func pathExempt(rule model.AuditRule, path string) bool {
+	globs := splitNonEmpty(rule.Params["exempt_paths"])
+	for _, g := range globs {
+		if matchPathGlob(g, path) {
+			return true
+		}
+	}
+	return false
 }

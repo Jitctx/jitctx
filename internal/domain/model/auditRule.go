@@ -19,6 +19,14 @@ const (
 	// subset surfaced as evidence under the {missing} substitution token.
 	// PC01RF-001 (proposal-changes-01).
 	AuditKindRequiredAnnotations AuditRuleKind = "required_annotations"
+
+	// AuditKindForbiddenAnnotations enforces that NONE of the listed
+	// annotation simple names are present on a target. The target scope
+	// is selected by params["target"] ∈ {"class", "field"} (default
+	// "class"). Per-rule path exemptions are honoured via
+	// params["exempt_paths"] (comma-joined list of forward-slash globs).
+	// PC01RF-002, PC01RF-003, PC01RF-008.
+	AuditKindForbiddenAnnotations AuditRuleKind = "forbidden_annotations"
 )
 
 // AuditSeverity is the severity badge attached to a violation.

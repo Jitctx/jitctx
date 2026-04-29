@@ -581,7 +581,6 @@ func TestAuditEvaluator_RequiredAnnotations_MalformedRuleEmitsNothing(t *testing
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			rule := model.AuditRule{
@@ -612,4 +611,365 @@ func TestAuditEvaluator_RequiredAnnotations_NonClassDeclarationIgnoredByDefault(
 	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
 
 	require.Empty(t, got, "interfaces must be skipped by default node_types filter")
+}
+
+// ---------------------------------------------------------------------------
+// forbidden_annotations  (PC01US-004 / PC01RF-002 / PC01RF-003 / PC01RF-008 / PC01RF-009)
+// ---------------------------------------------------------------------------
+
+// forbiddenAnnotationsFieldRule returns the canonical field-scope rule fixture
+// for PC01US-004: "Production classes must not inject dependencies via
+// @Autowired field injection".
+func forbiddenAnnotationsFieldRule() model.AuditRule {
+	return model.AuditRule{
+		ID:          "no-field-injection",
+		Kind:        model.AuditKindForbiddenAnnotations,
+		Severity:    model.AuditSeverityError,
+		Description: "Field {name} carries a forbidden annotation; found={found}",
+		Suggestion:  "Replace field injection with constructor injection for {name}",
+		Params: map[string]string{
+			"path_scope":   "src/main/java/",
+			"annotations":  "Autowired",
+			"target":       "field",
+			"node_types":   "class_declaration",
+			"exempt_paths": "**/testsupport/**",
+		},
+	}
+}
+
+func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_FlagsAutowired(t *testing.T) {
+	t.Parallel()
+	// PC01US-004 Scenario 1: a field carrying @Autowired inside a production
+	// file produces exactly one violation whose Line matches the field's line
+	// and whose evidence contains "found=[Autowired]".
+
+	rule := forbiddenAnnotationsFieldRule()
+	field := model.JavaField{
+		Name:        "userRepository",
+		Type:        "UserRepository",
+		Annotations: []string{"Autowired"},
+		Line:        12,
+	}
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/service/UserService.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserService",
+				Fields:   []model.JavaField{field},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "exactly one violation expected for the Autowired field")
+	v := got[0]
+	require.Equal(t, rule.ID, v.RuleID)
+	require.Equal(t, model.AuditKindForbiddenAnnotations, v.Kind)
+	require.Equal(t, model.AuditSeverityError, v.Severity)
+	require.Equal(t, testModuleID, v.ModuleID)
+	require.Equal(t, summary.Path, v.FilePath)
+	require.Equal(t, field.Line, v.Line,
+		"PC01US-004 Scenario 1: violation Line must equal the field's line")
+	require.Contains(t, v.Message, "found=[Autowired]",
+		"PC01RF-009: evidence must surface the forbidden annotations actually found")
+}
+
+func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_NoFlagWhenAnnotationAbsent(t *testing.T) {
+	t.Parallel()
+	// A field annotated with @Inject (not @Autowired) must not trigger the rule.
+
+	rule := forbiddenAnnotationsFieldRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/service/UserService.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserService",
+				Fields: []model.JavaField{
+					{Name: "userRepository", Type: "UserRepository", Annotations: []string{"Inject"}, Line: 12},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "rule must not fire when field carries only non-forbidden annotations")
+}
+
+func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_RespectsExemptPaths(t *testing.T) {
+	t.Parallel()
+	// PC01RF-008: a file under **/testsupport/** is exempt from the rule
+	// even when the field carries the forbidden annotation.
+
+	rule := forbiddenAnnotationsFieldRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/testsupport/Helper.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Helper",
+				Fields: []model.JavaField{
+					{Name: "svc", Type: "UserService", Annotations: []string{"Autowired"}, Line: 8},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "PC01RF-008: exempt_paths must suppress violations for testsupport files")
+}
+
+func TestAuditEvaluator_ForbiddenAnnotations_OutsidePathScopeIsIgnored(t *testing.T) {
+	t.Parallel()
+	// A file whose path does not contain path_scope must produce zero violations
+	// even when its fields carry forbidden annotations.
+
+	rule := forbiddenAnnotationsFieldRule()
+	summary := model.JavaFileSummary{
+		// path_scope is "/src/main/java/" — test sources are outside scope
+		Path: "src/test/java/com/acme/service/UserServiceTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "UserServiceTest",
+				Fields: []model.JavaField{
+					{Name: "userRepository", Type: "UserRepository", Annotations: []string{"Autowired"}, Line: 15},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "rule must not fire for files outside path_scope")
+}
+
+func TestAuditEvaluator_ForbiddenAnnotations_ClassScope_FlagsClassAnnotation(t *testing.T) {
+	t.Parallel()
+	// target=class: a declaration carrying @Deprecated must produce one
+	// violation with Line==0 and the declaration's simple name.
+
+	rule := model.AuditRule{
+		ID:          "no-deprecated-classes",
+		Kind:        model.AuditKindForbiddenAnnotations,
+		Severity:    model.AuditSeverityWarning,
+		Description: "Class {name} is annotated with a forbidden annotation; found={found}",
+		Suggestion:  "Remove the forbidden annotation from {name}",
+		Params: map[string]string{
+			"path_scope":  "src/main/java/",
+			"annotations": "Deprecated",
+			"target":      "class",
+			"node_types":  "class_declaration",
+		},
+	}
+	decl := model.JavaDeclaration{
+		NodeType:    "class_declaration",
+		Name:        "LegacyAdapter",
+		Annotations: []string{"Deprecated"},
+	}
+	summary := model.JavaFileSummary{
+		Path:         "src/main/java/com/acme/adapter/LegacyAdapter.java",
+		Declarations: []model.JavaDeclaration{decl},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "exactly one violation expected for the Deprecated class")
+	v := got[0]
+	require.Equal(t, rule.ID, v.RuleID)
+	require.Equal(t, 0, v.Line,
+		"target=class violations always carry Line==0 (class line not captured)")
+	require.Contains(t, v.Message, decl.Name,
+		"violation message must reference the declaration's simple name")
+	require.Contains(t, v.Message, "found=[Deprecated]",
+		"PC01RF-009: found evidence must list the forbidden annotation")
+}
+
+func TestAuditEvaluator_ForbiddenAnnotations_MalformedRuleEmitsNothing(t *testing.T) {
+	t.Parallel()
+	// Defensive: empty annotations, missing path_scope, or unknown target must
+	// each produce zero violations rather than panic or spurious output.
+
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/service/UserService.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "UserService",
+				Annotations: []string{"Autowired"},
+				Fields: []model.JavaField{
+					{Name: "repo", Type: "UserRepo", Annotations: []string{"Autowired"}, Line: 5},
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		name   string
+		params map[string]string
+	}{
+		{
+			"empty-annotations",
+			map[string]string{
+				"path_scope":  "/src/main/java/",
+				"annotations": "",
+				"target":      "field",
+			},
+		},
+		{
+			"missing-path-scope",
+			map[string]string{
+				"path_scope":  "",
+				"annotations": "Autowired",
+				"target":      "field",
+			},
+		},
+		{
+			"unknown-target",
+			map[string]string{
+				"path_scope":  "/src/main/java/",
+				"annotations": "Autowired",
+				"target":      "method",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rule := model.AuditRule{
+				ID:       "broken",
+				Kind:     model.AuditKindForbiddenAnnotations,
+				Severity: model.AuditSeverityError,
+				Params:   tc.params,
+			}
+			got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+			require.Empty(t, got, "malformed rule must produce no violations; case: %s", tc.name)
+		})
+	}
+}
+
+func TestAuditEvaluator_ForbiddenAnnotations_MultipleFieldsOneOffending(t *testing.T) {
+	t.Parallel()
+	// When a class has two fields but only one carries the forbidden annotation,
+	// exactly one violation must be produced pointing to the offending field.
+
+	rule := forbiddenAnnotationsFieldRule()
+	offendingField := model.JavaField{
+		Name:        "userRepository",
+		Type:        "UserRepository",
+		Annotations: []string{"Autowired"},
+		Line:        20,
+	}
+	cleanField := model.JavaField{
+		Name:        "logger",
+		Type:        "Logger",
+		Annotations: nil,
+		Line:        18,
+	}
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/service/OrderService.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "OrderService",
+				Fields:   []model.JavaField{cleanField, offendingField},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "exactly one violation expected — only the Autowired field is offending")
+	v := got[0]
+	require.Equal(t, offendingField.Line, v.Line,
+		"violation must point to the offending field's line, not the clean field")
+	require.Contains(t, v.Message, offendingField.Name,
+		"violation message must name the offending field")
+}
+
+// TestAuditEvaluator_MatchPathGlob verifies the matchPathGlob semantics
+// end-to-end through evalForbiddenAnnotations / pathExempt. The table covers
+// every case specified in plan §7.2.
+//
+// Test strategy: build a summary whose field carries the forbidden annotation
+// and set exempt_paths to the pattern under test. When the pattern matches the
+// file path the evaluator returns zero violations (exempted); when the pattern
+// does NOT match the evaluator returns one violation. This exercises the full
+// matchPathGlob / matchSegments logic without needing direct access to the
+// unexported function.
+func TestAuditEvaluator_MatchPathGlob(t *testing.T) {
+	t.Parallel()
+
+	// baseRule is the field-scope forbidden_annotations rule reused across
+	// all subtests; only exempt_paths changes per case.
+	baseRule := func(exemptPattern string) model.AuditRule {
+		return model.AuditRule{
+			ID:          "no-field-injection",
+			Kind:        model.AuditKindForbiddenAnnotations,
+			Severity:    model.AuditSeverityError,
+			Description: "found={found}",
+			Suggestion:  "fix {name}",
+			Params: map[string]string{
+				"path_scope":   "/",
+				"annotations":  "Autowired",
+				"target":       "field",
+				"node_types":   "class_declaration",
+				"exempt_paths": exemptPattern,
+			},
+		}
+	}
+
+	makeSummary := func(path string) model.JavaFileSummary {
+		return model.JavaFileSummary{
+			Path: path,
+			Declarations: []model.JavaDeclaration{
+				{
+					NodeType: "class_declaration",
+					Name:     "SomeClass",
+					Fields: []model.JavaField{
+						{Name: "dep", Type: "Dep", Annotations: []string{"Autowired"}, Line: 5},
+					},
+				},
+			},
+		}
+	}
+
+	cases := []struct {
+		pattern string
+		path    string
+		match   bool // true → exempt (zero violations); false → not exempt (one violation)
+	}{
+		// ** matches zero or more path segments
+		{"**/testsupport/**", "src/test/java/com/acme/testsupport/Helper.java", true},
+		{"**/testsupport/**", "src/main/java/com/acme/Foo.java", false},
+		// ** at end anchors to the directory itself
+		{"**/testsupport", "src/test/java/com/acme/testsupport", true},
+		{"**/testsupport", "src/test/java/com/acme/testsupport/Helper.java", false},
+		// ** before filename
+		{"**/Helper.java", "src/test/java/com/acme/testsupport/Helper.java", true},
+		// **/foo/** where path ends at the directory (no trailing file)
+		{"**/foo/**", "src/test/java/com/acme/foo", true},
+		{"**/foo/**", "src/main/java/foo.txt", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.pattern+"|"+tc.path, func(t *testing.T) {
+			t.Parallel()
+			rule := baseRule(tc.pattern)
+			summary := makeSummary(tc.path)
+			got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+			if tc.match {
+				require.Empty(t, got,
+					"pattern %q should match %q (file exempted, zero violations)", tc.pattern, tc.path)
+			} else {
+				require.Len(t, got, 1,
+					"pattern %q should NOT match %q (file not exempted, one violation)", tc.pattern, tc.path)
+			}
+		})
+	}
 }

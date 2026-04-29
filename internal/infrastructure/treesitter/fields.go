@@ -111,20 +111,31 @@ func extractFields(bodyNode *sitter.Node, src []byte) []model.JavaField {
 
 // extractFieldDeclaration expands one field_declaration node into one or more
 // JavaField values (one per variable_declarator).
+//
+// All expanded values from a single field_declaration share the same Line and
+// Annotations (e.g. `@Autowired private UserRepo a, b;` produces two JavaField
+// values with identical Annotations and Line — see plan §8 Q7).
 func extractFieldDeclaration(node *sitter.Node, src []byte) []model.JavaField {
+	// Capture the 1-based line of the field_declaration node once.
+	// Matches the convention used in comments.go (StartPoint().Row + 1).
+	line := int(node.StartPoint().Row) + 1
+
 	// Determine the type of the field. The type node appears before the
 	// variable_declarator(s). We accept the same set of type node kinds that
 	// buildMethodSignature accepts.
+	// In the same pass, capture the modifiers child for annotation extraction.
 	var fieldType string
+	var modifiersChild *sitter.Node
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
+		case nodeModifiers:
+			modifiersChild = child
 		case nodeTypeIdentifier, nodeIntegralType, nodeFloatingPointType, nodeBooleanType,
 			nodeArrayType, nodeGenericType, nodeScopedTypeIdentifier, nodeVoidType:
-			fieldType = nodeText(child, src)
-		}
-		if fieldType != "" {
-			break
+			if fieldType == "" {
+				fieldType = nodeText(child, src)
+			}
 		}
 	}
 
@@ -132,6 +143,11 @@ func extractFieldDeclaration(node *sitter.Node, src []byte) []model.JavaField {
 		// Unparseable type — skip silently.
 		return nil
 	}
+
+	// Extract annotation simple names from the modifiers child (if any).
+	// The qualified names are discarded — only simple names are needed for the
+	// forbidden_annotations evaluator.
+	fieldAnnotations, _ := extractAnnotations(modifiersChild, src)
 
 	// Collect all variable_declarator names (handles multi-declarator fields).
 	var fields []model.JavaField
@@ -144,7 +160,12 @@ func extractFieldDeclaration(node *sitter.Node, src []byte) []model.JavaField {
 		if name == "" {
 			continue // malformed declarator — skip silently
 		}
-		fields = append(fields, model.JavaField{Name: name, Type: fieldType})
+		fields = append(fields, model.JavaField{
+			Name:        name,
+			Type:        fieldType,
+			Annotations: fieldAnnotations,
+			Line:        line,
+		})
 	}
 	return fields
 }

@@ -10,11 +10,13 @@ type JavaFileSummary struct {
 }
 
 // JavaField represents one field declared in a class body. Used by audit
-// rule kind field_type_layer_violation. Empty slice when the declaration
-// is not a class or has no fields.
+// rule kinds field_type_layer_violation and forbidden_annotations. Empty
+// slice when the declaration is not a class or has no fields.
 type JavaField struct {
-	Name string // field identifier, e.g. "repository"
-	Type string // raw type token as it appears in source, e.g. "UserRepositoryJpa" or "List<User>"
+	Name        string   // field identifier, e.g. "repository"
+	Type        string   // raw type token as it appears in source, e.g. "UserRepositoryJpa" or "List<User>"
+	Annotations []string // simple names, no leading @ (e.g. ["Autowired"]). Empty when not extracted.
+	Line        int      // 1-based line of the field_declaration node. 0 if unknown.
 }
 
 // JavaDeclaration represents a top-level type declaration in a Java file.
