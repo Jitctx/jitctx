@@ -1935,3 +1935,212 @@ func TestEvaluateFile_RequiredParameterizedSupertype_OuterGlobMatchesScopedFQN(t
 
 	require.Empty(t, got, "outer glob '*.UseCase' must match scoped FQN 'port.in.UseCase' via suffix-match")
 }
+
+// ---------------------------------------------------------------------------
+// required_annotations — PC01US-010 / non_empty_value_annotations (T6-G1)
+// ---------------------------------------------------------------------------
+
+// txDecoratorContractRule returns the canonical rule fixture for PC01US-010:
+// "Tx-decorator classes must declare @Primary and @Qualifier with a non-empty
+// string value". The Description embeds the {evidence} placeholder so the
+// substituted Message carries the evidence asserted by each AC scenario.
+//
+// NOTE: This helper lives in a _test.go file, so PC01RNF-001's proscribed-string
+// gate does not apply — same posture as unitTestClassContractRule() for the
+// Mockito/ExtendWith literals in PC01US-006.
+func txDecoratorContractRule() model.AuditRule {
+	return model.AuditRule{
+		ID:          "tx-decorator-contract",
+		Kind:        model.AuditKindRequiredAnnotations,
+		Severity:    model.AuditSeverityError,
+		Description: "{name}: {evidence}",
+		Suggestion:  "Apply the contract to {name}",
+		Params: map[string]string{
+			"path_scope":                  "src/main/java/",
+			"annotations":                 "Primary,Qualifier",
+			"non_empty_value_annotations": "Qualifier",
+			"node_types":                  "class_declaration",
+		},
+	}
+}
+
+func TestAuditEvaluator_RequiredAnnotations_TxDecorator_PrimaryAndQualifierWithNonEmptyValuePass(t *testing.T) {
+	t.Parallel()
+	// AC1: a class with both @Primary and @Qualifier("txDecorator") inside
+	// path_scope must produce zero violations — the Qualifier argument is
+	// non-empty, so the non_empty_value_annotations check passes.
+
+	rule := txDecoratorContractRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/decorator/OrderServiceTxDecorator.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "OrderServiceTxDecorator",
+				Annotations: []string{"Primary", "Qualifier"},
+				AnnotationArgs: map[string]string{
+					"Primary":   "",
+					"Qualifier": `"txDecorator"`,
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "AC1: no violations expected when both annotations are present and Qualifier has a non-empty value")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_TxDecorator_PrimaryOnlyEmitsMissingQualifier(t *testing.T) {
+	t.Parallel()
+	// AC2: a class that has @Primary but is missing @Qualifier must produce
+	// exactly one violation whose message contains "missing=[Qualifier]".
+
+	rule := txDecoratorContractRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/decorator/OrderServiceTxDecorator.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "OrderServiceTxDecorator",
+				Annotations: []string{"Primary"},
+				AnnotationArgs: map[string]string{
+					"Primary": "",
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "AC2: exactly one violation expected for missing @Qualifier")
+	require.Contains(t, got[0].Message, "missing=[Qualifier]",
+		"AC2: violation evidence must surface the missing-annotation list")
+}
+
+func TestAuditEvaluator_RequiredAnnotations_TxDecorator_EmptyQualifierValueEmitsNonEmptyEvidence(t *testing.T) {
+	t.Parallel()
+	// AC3: a class with both @Primary and @Qualifier("") (captured as the
+	// four-character string `""`) must produce exactly one violation whose
+	// message contains "annotation=Qualifier, value=empty, expected=non-empty".
+
+	rule := txDecoratorContractRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/decorator/OrderServiceTxDecorator.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "OrderServiceTxDecorator",
+				Annotations: []string{"Primary", "Qualifier"},
+				AnnotationArgs: map[string]string{
+					"Primary":   "",
+					"Qualifier": `""`,
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "AC3: exactly one violation expected for empty Qualifier argument")
+	require.Contains(t, got[0].Message, "annotation=Qualifier, value=empty, expected=non-empty",
+		"AC3: violation evidence must use the canonical non-empty-value format")
+
+	// isEmptyAnnotationArg coverage: verify all three empty forms and three
+	// non-empty forms behave correctly via the evaluator's public path.
+	t.Run("isEmptyAnnotationArg_emptyForms", func(t *testing.T) {
+		t.Parallel()
+		emptyForms := []string{"", `""`, `''`}
+		for _, form := range emptyForms {
+			t.Run("form="+form, func(t *testing.T) {
+				t.Parallel()
+				s := model.JavaFileSummary{
+					Path: "src/main/java/com/acme/application/decorator/X.java",
+					Declarations: []model.JavaDeclaration{
+						{
+							NodeType:       "class_declaration",
+							Name:           "X",
+							Annotations:    []string{"Primary", "Qualifier"},
+							AnnotationArgs: map[string]string{"Primary": "", "Qualifier": form},
+						},
+					},
+				}
+				v := newEvaluator().EvaluateFile(testModuleID, s, []model.AuditRule{txDecoratorContractRule()})
+				require.Len(t, v, 1, "empty form %q must trigger a non-empty-value violation", form)
+				require.Contains(t, v[0].Message, "annotation=Qualifier, value=empty, expected=non-empty")
+			})
+		}
+	})
+
+	t.Run("isEmptyAnnotationArg_nonEmptyForms", func(t *testing.T) {
+		t.Parallel()
+		nonEmptyForms := []string{"x", `"x"`, `" "`}
+		for _, form := range nonEmptyForms {
+			t.Run("form="+form, func(t *testing.T) {
+				t.Parallel()
+				s := model.JavaFileSummary{
+					Path: "src/main/java/com/acme/application/decorator/X.java",
+					Declarations: []model.JavaDeclaration{
+						{
+							NodeType:       "class_declaration",
+							Name:           "X",
+							Annotations:    []string{"Primary", "Qualifier"},
+							AnnotationArgs: map[string]string{"Primary": "", "Qualifier": form},
+						},
+					},
+				}
+				v := newEvaluator().EvaluateFile(testModuleID, s, []model.AuditRule{txDecoratorContractRule()})
+				require.Empty(t, v, "non-empty form %q must not trigger a non-empty-value violation", form)
+			})
+		}
+	})
+}
+
+func TestAuditEvaluator_RequiredAnnotations_TxDecorator_OrderingMissingThenExpectedValuesThenNonEmpty(t *testing.T) {
+	t.Parallel()
+	// PC01RNF-003 ordering: when a class is missing @Other, has @Primary with a
+	// wrong expected_value, and has @Qualifier("") (empty), the evaluator must
+	// emit exactly three violations in deterministic order:
+	//   [0] missing=[Other]
+	//   [1] annotation=Primary, expected_value=somevalue, actual=wrongvalue
+	//   [2] annotation=Qualifier, value=empty, expected=non-empty
+
+	rule := model.AuditRule{
+		ID:          "tx-decorator-contract-ordering",
+		Kind:        model.AuditKindRequiredAnnotations,
+		Severity:    model.AuditSeverityError,
+		Description: "{name}: {evidence}",
+		Suggestion:  "Apply the contract to {name}",
+		Params: map[string]string{
+			"path_scope":                  "src/main/java/",
+			"annotations":                 "Primary,Qualifier,Other",
+			"expected_values":             "Primary=somevalue",
+			"non_empty_value_annotations": "Qualifier",
+			"node_types":                  "class_declaration",
+		},
+	}
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/decorator/OrderServiceTxDecorator.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:    "class_declaration",
+				Name:        "OrderServiceTxDecorator",
+				Annotations: []string{"Primary", "Qualifier"},
+				AnnotationArgs: map[string]string{
+					"Primary":   "wrongvalue",
+					"Qualifier": `""`,
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 3, "PC01RNF-003: exactly three violations expected")
+	require.Contains(t, got[0].Message, "missing=[Other]",
+		"PC01RNF-003: missing-violation must be emitted first")
+	require.Contains(t, got[1].Message, "expected_value=somevalue, actual=wrongvalue",
+		"PC01RNF-003: expected_values mismatch must follow the missing-violation")
+	require.Contains(t, got[2].Message, "annotation=Qualifier, value=empty, expected=non-empty",
+		"PC01RNF-003: non-empty-value violation must be emitted last")
+}

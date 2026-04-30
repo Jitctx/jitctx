@@ -297,6 +297,18 @@ func evalFieldTypeLayerViolation(
 //	                   Limitation: argument values containing commas are NOT
 //	                   supported. Profile authors needing such values must
 //	                   wait for a future-extension key (out of scope; Q7).
+//	"non_empty_value_annotations": OPTIONAL comma-joined list of annotation
+//	                   simple names (without the leading "@"). For each listed
+//	                   annotation that IS present on a matching declaration,
+//	                   the evaluator checks whether decl.AnnotationArgs[ann]
+//	                   is considered empty by isEmptyAnnotationArg (covers
+//	                   the empty-string, bare double-quote pair, and bare
+//	                   single-quote pair forms). When empty, ONE additional
+//	                   violation is emitted per offending name with evidence
+//	                   "annotation=<ann>, value=empty, expected=non-empty".
+//	                   Names NOT present on the declaration are silently
+//	                   skipped (the missing-violation path covers absence).
+//	                   PC01RF-007 (non-empty matcher), PC01US-010.
 //	"node_types":      optional comma-joined list of declaration node types
 //	                   the rule applies to. Default "class_declaration". Use
 //	                   "*" or empty to skip the node-type filter.
@@ -310,24 +322,28 @@ func evalFieldTypeLayerViolation(
 //	             NOT present, ordered by params["annotations"];
 //	           — for an arg-mismatch violation: literal
 //	             "annotation=<ann>, expected_value=<expected>, actual=<actual>"
-//	             where <actual> is decl.AnnotationArgs[<ann>] (may be "").
+//	             where <actual> is decl.AnnotationArgs[<ann>] (may be "");
+//	           — for a non-empty-value violation: literal
+//	             "annotation=<ann>, value=empty, expected=non-empty"
+//	             where <ann> is the offending annotation simple name.
 //	{missing}  — same as {evidence} for the missing-violation (backward
 //	             compat for templates that still use {missing}); not
-//	             populated for arg-mismatch violations.
+//	             populated for arg-mismatch or non-empty-value violations.
 //
 // Determinism (PC01RNF-003):
 //   - "expected_values" is parsed into an ORDERED slice of pairs in the
 //     order the pairs appear in the input string.
 //   - The evaluator iterates that ordered slice; it never iterates a Go
 //     map for emit ordering.
-//   - When BOTH a missing-violation AND one or more arg-mismatch
-//     violations apply to the same declaration, the missing violation is
-//     emitted FIRST, then arg-mismatch violations in the
-//     "expected_values" order.
+//   - "non_empty_value_annotations" is split via splitNonEmpty and iterated
+//     in input-string order, after the missing-violation and expected_values
+//     violations.
+//   - Per-declaration emit order: missing → expected_values mismatches →
+//     non_empty_value_annotations empty-value violations.
 //
 // PC01RF-001 (all-of presence), PC01RF-007 (argument matching),
 // PC01RNF-001 (engine language-neutrality — no Java/Spring identifiers
-// referenced here), PC01RF-009 (evidence-rich messages).
+// referenced here), PC01RF-009 (evidence-rich messages), PC01US-010.
 func evalRequiredAnnotations(
 	moduleID string, summary model.JavaFileSummary, rule model.AuditRule,
 ) []auditvo.AuditViolation {
@@ -388,6 +404,33 @@ func evalRequiredAnnotations(
 				"evidence": mismatchEvidence,
 			}
 			violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctxMm))
+		}
+		// PC01US-010: non-empty-value branch.
+		// For every annotation listed in non_empty_value_annotations that
+		// IS present on this declaration, emit one violation if its
+		// captured argument text is considered empty by isEmptyAnnotationArg.
+		//
+		// Determinism: input-string order via splitNonEmpty (PC01RNF-003).
+		// Short-circuit: an annotation absent from decl.Annotations is
+		// already covered by the missing-violation path; this branch only
+		// fires for annotations actually present whose captured arg text is
+		// empty.
+		for _, ann := range splitNonEmpty(rule.Params["non_empty_value_annotations"]) {
+			if !slices.Contains(decl.Annotations, ann) {
+				continue
+			}
+			actual := decl.AnnotationArgs[ann]
+			if !isEmptyAnnotationArg(actual) {
+				continue
+			}
+			evidence := "annotation=" + ann + ", value=empty, expected=non-empty"
+			ctxNe := map[string]string{
+				"file":     summary.Path,
+				"name":     decl.Name,
+				"required": strings.Join(required, ","),
+				"evidence": evidence,
+			}
+			violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctxNe))
 		}
 	}
 	return violations
@@ -731,6 +774,34 @@ func parseExpectedValues(s string) []expectedValuePair {
 		out = append(out, expectedValuePair{Annotation: ann, Expected: last[ann]})
 	}
 	return out
+}
+
+// isEmptyAnnotationArg reports whether the captured annotation-argument text
+// represents an "empty" value, per PC01RF-007. The Tree-sitter parser stores
+// annotation arguments VERBATIM, including surrounding quotes for string
+// literals. Therefore three forms map to "empty":
+//
+//   - ""     — marker annotation (no argument list captured); the parser
+//     leaves the entry as the empty string.
+//   - `""`   — explicit empty string literal @Ann("").
+//   - `”`   — explicit empty char/string literal @Ann(”) (Java char
+//     literal; defensive — most JVM toolchains reject this at compile
+//     time, but the parser would still capture it verbatim).
+//
+// All other captures (including whitespace-only such as `" "` or `"0"` or
+// `"false"`) are treated as NON-empty: the predicate is strictly about the
+// parser-captured text, not about semantic emptiness. Profile authors
+// needing semantic emptiness can layer expected_values on top.
+//
+// PC01RF-007 (annotation argument matching), PC01RNF-001 (no language
+// identifier in this function — only verbatim parser output is matched),
+// PC01RNF-003 (deterministic — pure string comparison), PC01US-010.
+func isEmptyAnnotationArg(captured string) bool {
+	switch captured {
+	case "", `""`, `''`:
+		return true
+	}
+	return false
 }
 
 // evalMethodNaming — params:
