@@ -250,15 +250,29 @@ func extractClassDeclaration(node *sitter.Node, src []byte) model.JavaDeclaratio
 		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
 		case nodeSuperclass:
-			// superclass has a type child
+			// superclass has a type child; generic_type children also populate ParameterizedSupertypes.
 			for j := 0; j < int(child.ChildCount()); j++ {
 				tc := child.Child(j)
-				if tc.Type() == nodeTypeIdentifier || tc.Type() == nodeGenericType {
+				switch tc.Type() {
+				case nodeTypeIdentifier:
 					decl.Extends = append(decl.Extends, extractSimpleName(nodeText(tc, src)))
+				case nodeGenericType:
+					raw := nodeText(tc, src)
+					decl.Extends = append(decl.Extends, extractSimpleName(raw))
+					if outer, args, ok := splitGenericArgs(raw); ok {
+						decl.ParameterizedSupertypes = append(decl.ParameterizedSupertypes,
+							model.ParameterizedSupertype{
+								Kind:     model.SupertypeKindExtends,
+								Outer:    outer,
+								TypeArgs: args,
+							})
+					}
 				}
 			}
 		case nodeSuperInterfaces:
-			decl.Implements = extractTypeList(child, src)
+			simple, params := extractTypeListWithGenerics(child, src, model.SupertypeKindImplements)
+			decl.Implements = simple
+			decl.ParameterizedSupertypes = append(decl.ParameterizedSupertypes, params...)
 		case nodeClassBody:
 			decl.Methods = extractMethods(child, src)
 			decl.Fields = extractFields(child, src)
@@ -281,7 +295,10 @@ func extractInterfaceDeclaration(node *sitter.Node, src []byte) model.JavaDeclar
 		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
 		case nodeExtendsInterfaces:
-			decl.Extends = extractTypeList(child, src)
+			// interface_declaration uses extends for super-interfaces; tag as SupertypeKindExtends.
+			simple, params := extractTypeListWithGenerics(child, src, model.SupertypeKindExtends)
+			decl.Extends = simple
+			decl.ParameterizedSupertypes = append(decl.ParameterizedSupertypes, params...)
 		case nodeInterfaceBody:
 			decl.Methods = extractMethods(child, src)
 		}
@@ -302,7 +319,9 @@ func extractEnumDeclaration(node *sitter.Node, src []byte) model.JavaDeclaration
 		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
 		case nodeSuperInterfaces:
-			decl.Implements = extractTypeList(child, src)
+			simple, params := extractTypeListWithGenerics(child, src, model.SupertypeKindImplements)
+			decl.Implements = simple
+			decl.ParameterizedSupertypes = append(decl.ParameterizedSupertypes, params...)
 		}
 	}
 	return decl
@@ -321,7 +340,9 @@ func extractRecordDeclaration(node *sitter.Node, src []byte) model.JavaDeclarati
 		case nodeIdentifier:
 			decl.Name = nodeText(child, src)
 		case nodeSuperInterfaces:
-			decl.Implements = extractTypeList(child, src)
+			simple, params := extractTypeListWithGenerics(child, src, model.SupertypeKindImplements)
+			decl.Implements = simple
+			decl.ParameterizedSupertypes = append(decl.ParameterizedSupertypes, params...)
 		}
 	}
 	return decl
@@ -341,25 +362,84 @@ func annotationArgsMap(simple, args []string) map[string]string {
 	return m
 }
 
-// extractTypeList extracts type names from a super_interfaces or extends_interfaces node.
-func extractTypeList(node *sitter.Node, src []byte) []string {
-	var types []string
+// extractTypeListWithGenerics returns the simple-name slice (existing behaviour:
+// generics stripped via extractSimpleName) AND a slice of ParameterizedSupertype
+// entries for each generic_type child. The simple-name slice keeps its current
+// ordering; the supertype slice is in the same source order. For non-generic
+// type_identifier children, no ParameterizedSupertype entry is emitted.
+//
+// The kind argument is the kind to stamp on the emitted entries
+// (SupertypeKindImplements for super_interfaces children of class and record
+// declarations; SupertypeKindExtends for class superclass; SupertypeKindExtends
+// for interface_declaration extends_interfaces children).
+//
+// PC01RF-006, PC01RF-010.
+func extractTypeListWithGenerics(
+	node *sitter.Node, src []byte, kind model.SupertypeKind,
+) (simple []string, params []model.ParameterizedSupertype) {
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
-		if child.Type() == nodeTypeList || child.Type() == nodeInterfaceTypeList {
-			for j := 0; j < int(child.ChildCount()); j++ {
-				tc := child.Child(j)
-				switch tc.Type() {
-				case nodeTypeIdentifier:
-					types = append(types, nodeText(tc, src))
-				case nodeGenericType:
-					// Strip generics for the implements check: List<User> → List
-					types = append(types, extractSimpleName(nodeText(tc, src)))
+		if child.Type() != nodeTypeList && child.Type() != nodeInterfaceTypeList {
+			continue
+		}
+		for j := 0; j < int(child.ChildCount()); j++ {
+			tc := child.Child(j)
+			switch tc.Type() {
+			case nodeTypeIdentifier:
+				simple = append(simple, nodeText(tc, src))
+			case nodeGenericType:
+				raw := nodeText(tc, src)
+				simple = append(simple, extractSimpleName(raw))
+				if outer, args, ok := splitGenericArgs(raw); ok {
+					params = append(params, model.ParameterizedSupertype{
+						Kind:     kind,
+						Outer:    outer,
+						TypeArgs: args,
+					})
 				}
 			}
 		}
 	}
-	return types
+	return
+}
+
+// splitGenericArgs takes a raw generic-type text (e.g. "UseCase<String, List<User>>")
+// and returns (outer="UseCase", args=["String", "List<User>"], ok=true). Splitting
+// honours nested angle brackets via a depth counter; commas at depth>0 remain inside
+// their owning arg. When the input has no '<>', returns (input, nil, false).
+// Whitespace inside args is trimmed.
+func splitGenericArgs(raw string) (outer string, args []string, ok bool) {
+	open := strings.Index(raw, "<")
+	if open < 0 {
+		return raw, nil, false
+	}
+	outer = strings.TrimSpace(raw[:open])
+	inner := raw[open+1:]
+	// Strip the trailing '>'
+	if last := strings.LastIndex(inner, ">"); last >= 0 {
+		inner = inner[:last]
+	}
+	// Walk char-by-char, splitting on depth-zero commas.
+	depth := 0
+	start := 0
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, strings.TrimSpace(inner[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	// Append the last (or only) arg.
+	if tail := strings.TrimSpace(inner[start:]); tail != "" {
+		args = append(args, tail)
+	}
+	return outer, args, true
 }
 
 // extractSimpleName strips generic type parameters: "List<User>" → "List".

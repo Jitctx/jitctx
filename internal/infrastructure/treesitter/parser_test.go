@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	domerr "github.com/jitctx/jitctx/internal/domain/errors"
+	"github.com/jitctx/jitctx/internal/domain/model"
 	"github.com/jitctx/jitctx/internal/infrastructure/treesitter"
 )
 
@@ -387,4 +388,94 @@ public class Plain {
 
 	require.Empty(t, decl.AnnotationArgs,
 		"class with no annotations must have nil or empty AnnotationArgs")
+}
+
+// TestParser_CapturesParameterizedImplements verifies that a class declaring
+// `implements UseCase<String, User>` populates both the simple Implements slice
+// (backward-compatible) and ParameterizedSupertypes with the correct Kind,
+// Outer name, and TypeArgs.
+// PC01RF-006, PC01RF-010.
+func TestParser_CapturesParameterizedImplements(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `class FindUser implements UseCase<String, User> { }`
+	fsys := fstest.MapFS{
+		"FindUser.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "FindUser.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+
+	// Backward-compatible simple-name slice must still be populated.
+	require.Contains(t, decl.Implements, "UseCase",
+		"Implements must contain the outer type name (simple name)")
+
+	// New parameterized-supertype field.
+	require.Len(t, decl.ParameterizedSupertypes, 1,
+		"exactly one ParameterizedSupertype expected")
+	ps := decl.ParameterizedSupertypes[0]
+	require.Equal(t, model.SupertypeKindImplements, ps.Kind)
+	require.Equal(t, "UseCase", ps.Outer)
+	require.Equal(t, []string{"String", "User"}, ps.TypeArgs)
+}
+
+// TestParser_CapturesParameterizedExtends verifies that a class declaring
+// `extends Base<X>` populates both the simple Extends slice and
+// ParameterizedSupertypes with Kind=SupertypeKindExtends.
+// PC01RF-006, PC01RF-010.
+func TestParser_CapturesParameterizedExtends(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `class A extends Base<X> { }`
+	fsys := fstest.MapFS{
+		"A.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "A.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+
+	// Backward-compatible simple-name slice must still be populated.
+	require.Contains(t, decl.Extends, "Base",
+		"Extends must contain the outer type name (simple name)")
+
+	// New parameterized-supertype field.
+	require.Len(t, decl.ParameterizedSupertypes, 1,
+		"exactly one ParameterizedSupertype expected")
+	ps := decl.ParameterizedSupertypes[0]
+	require.Equal(t, model.SupertypeKindExtends, ps.Kind)
+	require.Equal(t, "Base", ps.Outer)
+	require.Equal(t, []string{"X"}, ps.TypeArgs)
+}
+
+// TestParser_NestedGenericArgsPreserveCommas verifies that a comma inside a
+// nested generic (depth > 0) is NOT treated as a top-level argument separator.
+// `implements Foo<Map<String,User>>` must yield a single TypeArg "Map<String,User>".
+// PC01RF-006, PC01RNF-003.
+func TestParser_NestedGenericArgsPreserveCommas(t *testing.T) {
+	t.Parallel()
+
+	javaCode := `class A implements Foo<Map<String,User>> { }`
+	fsys := fstest.MapFS{
+		"A.java": &fstest.MapFile{Data: []byte(javaCode)},
+	}
+
+	p := treesitter.New()
+	summary, err := p.ParseJavaFile(context.Background(), fsys, "A.java")
+	require.NoError(t, err)
+	require.Len(t, summary.Declarations, 1)
+	decl := summary.Declarations[0]
+
+	require.Len(t, decl.ParameterizedSupertypes, 1,
+		"exactly one ParameterizedSupertype expected")
+	ps := decl.ParameterizedSupertypes[0]
+	require.Equal(t, model.SupertypeKindImplements, ps.Kind)
+	require.Equal(t, "Foo", ps.Outer)
+	require.Equal(t, []string{"Map<String,User>"}, ps.TypeArgs,
+		"nested generic comma must not split into two top-level args")
 }

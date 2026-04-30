@@ -1,5 +1,34 @@
 package model
 
+// SupertypeKind enumerates the two possible parameterized-supertype origins.
+// The string values are stable and may be referenced by profile authors via
+// the rule's "supertype_kind" param ("extends" | "implements" | "" meaning either).
+type SupertypeKind string
+
+const (
+	SupertypeKindExtends    SupertypeKind = "extends"
+	SupertypeKindImplements SupertypeKind = "implements"
+)
+
+// ParameterizedSupertype represents one parameterized supertype declared on a
+// class (either via `extends X<...>` or `implements Y<...>`). The outer name
+// is captured verbatim as it appears in source; type arguments are captured as
+// the comma-separated raw text tokens between the outermost angle brackets,
+// with surrounding whitespace trimmed but their inner structure preserved.
+//
+// The slice ONLY carries entries from declarations whose source form contains
+// `<...>` brackets. Bare-name supertypes (e.g. `implements Runnable`) continue
+// to populate the Implements and Extends fields exactly as today (backward
+// compatibility). TypeArgs are split on TOP-LEVEL commas (depth-zero) — no
+// structural parsing of the inner tokens is performed by the domain model.
+//
+// PC01RF-006, PC01RF-010.
+type ParameterizedSupertype struct {
+	Kind     SupertypeKind // "extends" | "implements"
+	Outer    string        // outer type name verbatim (simple or scoped)
+	TypeArgs []string      // raw type-argument tokens, trimmed; len == arity
+}
+
 // JavaFileSummary is the structured output produced by parsing a single Java file.
 type JavaFileSummary struct {
 	Path         string   // forward-slash path
@@ -28,7 +57,17 @@ type JavaDeclaration struct {
 	Implements           []string     // simple and/or qualified interface names
 	Extends              []string     // superclass simple or qualified name (length 0 or 1)
 	Methods              []JavaMethod // class/interface-owned methods
-	Fields               []JavaField  // NEW — empty for non-class declarations and for classes with no fields
+	Fields               []JavaField  // empty for non-class declarations and for classes with no fields
+
+	// ParameterizedSupertypes carries every parameterized supertype
+	// declared on this class via `extends X<...>` or `implements Y<...>`.
+	// Empty for non-class declarations and for classes whose supertypes are
+	// all non-parameterized. Order preserves source order: the Extends entry
+	// first (if any), then Implements entries in their declaration order.
+	// Populated by the language adapter; evaluators must treat nil and empty
+	// slice identically (no parameterized supertypes detected).
+	// PC01RF-006, PC01RF-010.
+	ParameterizedSupertypes []ParameterizedSupertype
 
 	// AnnotationArgs maps simple annotation name → text of the first
 	// positional argument as it appears in source (including quotes for

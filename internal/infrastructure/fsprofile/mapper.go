@@ -9,15 +9,16 @@ import (
 
 // knownAuditRuleKinds is the set of recognised AuditRuleKind values.
 var knownAuditRuleKinds = map[model.AuditRuleKind]bool{
-	model.AuditKindAnnotationPathMismatch:    true,
-	model.AuditKindImplementsPathMismatch:    true,
-	model.AuditKindInterfaceNaming:           true,
-	model.AuditKindForbiddenImport:           true,
-	model.AuditKindFieldTypeLayerViolation:   true,
-	model.AuditKindRequiredAnnotations:       true,
-	model.AuditKindForbiddenAnnotations:      true,
-	model.AuditKindMethodNaming:              true,
-	model.AuditKindForbiddenFieldTypePattern: true,
+	model.AuditKindAnnotationPathMismatch:         true,
+	model.AuditKindImplementsPathMismatch:         true,
+	model.AuditKindInterfaceNaming:                true,
+	model.AuditKindForbiddenImport:                true,
+	model.AuditKindFieldTypeLayerViolation:        true,
+	model.AuditKindRequiredAnnotations:            true,
+	model.AuditKindForbiddenAnnotations:           true,
+	model.AuditKindMethodNaming:                   true,
+	model.AuditKindForbiddenFieldTypePattern:      true,
+	model.AuditKindRequiredParameterizedSupertype: true, // PC01US-008
 }
 
 // knownAuditSeverities is the set of recognised AuditSeverity values.

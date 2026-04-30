@@ -41,6 +41,27 @@ const (
 	// "*" glob (suffix/prefix/full wildcard). Non-parameterized field types
 	// are silently skipped (Q4 of plan §8). PC01RF-005.
 	AuditKindForbiddenFieldTypePattern AuditRuleKind = "forbidden_field_type_pattern"
+
+	// AuditKindRequiredParameterizedSupertype enforces that every class
+	// declaration matching the rule scope declares a parameterized supertype
+	// (extends or implements) whose outer type matches a configured single-*
+	// glob and whose number of type arguments matches a configured arity,
+	// optionally with per-argument glob constraints.
+	//
+	// Non-parameterized supertypes (e.g. `extends Object` or `implements
+	// Cloneable` written without `<...>`) do NOT match the outer pattern —
+	// a class that declares only non-parameterized supertypes is treated
+	// identically to a class with no supertype clauses and produces an
+	// "actual=none" violation.
+	//
+	// Exactly ONE violation is emitted per declaration (mismatch driven by
+	// the FIRST matching candidate — deterministic on a given AST per
+	// PC01RNF-003). The outer pattern uses single-* glob semantics
+	// (leading-* suffix-match, trailing-* prefix-match, bare * wildcard,
+	// exact otherwise).
+	//
+	// PC01RF-006 (parameterized-supertype matching).
+	AuditKindRequiredParameterizedSupertype AuditRuleKind = "required_parameterized_supertype"
 )
 
 // AuditSeverity is the severity badge attached to a violation.

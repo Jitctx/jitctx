@@ -4,6 +4,7 @@ import (
 	stdpath "path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/jitctx/jitctx/internal/domain/model"
@@ -49,6 +50,8 @@ func (e *AuditEvaluator) EvaluateFile(
 			got = evalMethodNaming(moduleID, summary, rule)
 		case model.AuditKindForbiddenFieldTypePattern:
 			got = evalForbiddenFieldTypePattern(moduleID, summary, rule)
+		case model.AuditKindRequiredParameterizedSupertype:
+			got = evalRequiredParameterizedSupertype(moduleID, summary, rule)
 		default:
 			// Unknown kinds are skipped — the loader is responsible for
 			// rejecting unknown kinds; the evaluator must be defensive.
@@ -907,17 +910,7 @@ func matchTypePattern(fieldType, pattern string) (outer, inner string, matched b
 		return outer, inner, false
 	}
 
-	// Glob match on inner.
-	switch {
-	case innerPat == "*":
-		matched = true
-	case strings.HasPrefix(innerPat, "*"):
-		matched = strings.HasSuffix(inner, innerPat[1:])
-	case strings.HasSuffix(innerPat, "*"):
-		matched = strings.HasPrefix(inner, innerPat[:len(innerPat)-1])
-	default:
-		matched = inner == innerPat
-	}
+	matched = globMatch(innerPat, inner)
 	return outer, inner, matched
 }
 
@@ -932,4 +925,223 @@ func resolveFQN(simple string, imports []string) string {
 		}
 	}
 	return simple
+}
+
+// matchOuterGlob is the single-* glob matcher used for the outer-type name
+// comparison in required_parameterized_supertype evaluation. Semantics are
+// identical to the inner-glob branch extracted into globMatch.
+func matchOuterGlob(pattern, candidate string) bool { return globMatch(pattern, candidate) }
+
+// matchInnerGlob is the single-* glob matcher used for per-position type-argument
+// comparison in required_parameterized_supertype evaluation. Semantics are
+// identical to matchOuterGlob; kept distinct for readability at call sites.
+func matchInnerGlob(pattern, candidate string) bool { return globMatch(pattern, candidate) }
+
+// parseSupertypePattern splits a verbatim "Outer<arg1,arg2,...>" pattern into
+// the outer string, the arity, and the slot tokens. Splitting on commas honours
+// nested angle brackets — a `<` increments depth, a `>` decrements it, and only
+// depth-zero commas split. When the pattern contains no `<>` brackets the
+// function returns ("", 0, nil, false). The bool reports whether the pattern is
+// well-formed (non-empty outer, at least one slot).
+//
+// Example: parseSupertypePattern("UseCase<*,*>") returns ("UseCase", 2, ["*","*"], true).
+func parseSupertypePattern(pattern string) (outer string, arity int, slots []string, ok bool) {
+	firstLT := strings.Index(pattern, "<")
+	lastGT := strings.LastIndex(pattern, ">")
+	if firstLT < 0 || lastGT < 0 || lastGT <= firstLT {
+		return "", 0, nil, false
+	}
+	outer = strings.TrimSpace(pattern[:firstLT])
+	if outer == "" {
+		return "", 0, nil, false
+	}
+	inner := pattern[firstLT+1 : lastGT]
+	slots = splitTopLevel(inner)
+	if len(slots) == 0 {
+		return "", 0, nil, false
+	}
+	return outer, len(slots), slots, true
+}
+
+// splitTopLevel splits a string on top-level commas (depth-zero with respect to
+// angle brackets). Each returned token has surrounding whitespace trimmed.
+func splitTopLevel(s string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<':
+			depth++
+		case '>':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				out = append(out, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, strings.TrimSpace(s[start:]))
+	return out
+}
+
+// evalRequiredParameterizedSupertype — params:
+//
+//	"path_scope":         substring restricting which files this rule applies to. REQUIRED.
+//	"expected_supertype": REQUIRED. The outer-type glob plus parameter slot pattern,
+//	                      e.g. "UseCase<*,*>". The inner comma-separated tokens are
+//	                      read for ARITY only; per-slot globs come from "args".
+//	"args":               OPTIONAL comma-joined list of per-position globs. When
+//	                      absent, all positions default to "*". When present, must
+//	                      have arity matching expected_supertype; otherwise the rule
+//	                      is skipped defensively.
+//	"supertype_kind":     OPTIONAL — "extends" | "implements" | "" (default "").
+//	                      When non-empty, only entries with the matching Kind are
+//	                      considered. "actual=none" fires when zero entries remain.
+//	"node_types":         OPTIONAL — defaults to "class_declaration".
+//	"exempt_paths":       OPTIONAL comma-joined forward-slash globs; any match
+//	                      exempts the file from this rule.
+//
+// Substitution context (per emitted violation):
+//
+//	{file}               — summary.Path
+//	{name}               — declaration simple name
+//	{expected_supertype} — verbatim params["expected_supertype"]
+//	{expected_arity}     — strconv-formatted expected arity
+//	{actual}             — "none" when no candidate matched outer glob; otherwise
+//	                       Outer+"<"+strings.Join(TypeArgs,",")+">"+
+//	{actual_arity}       — strconv-formatted len(TypeArgs); "0" when actual=="none"
+//	{kind}               — candidate Kind; "" when actual=="none"
+//
+// PC01RF-006, PC01RF-009 (evidence-rich messages), PC01RNF-001 (no
+// Java/Spring/Lombok identifiers in this function), PC01RNF-003 (deterministic).
+func evalRequiredParameterizedSupertype(
+	moduleID string, summary model.JavaFileSummary, rule model.AuditRule,
+) []auditvo.AuditViolation {
+	pathScope := rule.Params["path_scope"]
+	expectedSupertypeRaw := rule.Params["expected_supertype"]
+	if pathScope == "" || expectedSupertypeRaw == "" {
+		return nil
+	}
+	if !strings.Contains(summary.Path, pathScope) {
+		return nil
+	}
+	if pathExempt(rule, summary.Path) {
+		return nil
+	}
+
+	expectedOuter, expectedArity, slots, ok := parseSupertypePattern(expectedSupertypeRaw)
+	if !ok {
+		// Malformed pattern — no angle brackets; skip rule defensively.
+		return nil
+	}
+
+	// Resolve per-slot arg globs.
+	argGlobs := splitNonEmpty(rule.Params["args"])
+	if len(argGlobs) == 0 {
+		argGlobs = make([]string, expectedArity)
+		for i := range argGlobs {
+			argGlobs[i] = "*"
+		}
+	} else if len(argGlobs) != expectedArity {
+		// args arity mismatch — skip defensively.
+		return nil
+	}
+	_ = slots // slots used only to derive expectedArity; argGlobs carry the actual per-position globs.
+
+	supertypeKindFilter := strings.ToLower(strings.TrimSpace(rule.Params["supertype_kind"]))
+
+	nodeTypes := splitNonEmpty(rule.Params["node_types"])
+	if len(nodeTypes) == 0 {
+		nodeTypes = []string{"class_declaration"}
+	}
+
+	expectedArityStr := strconv.Itoa(expectedArity)
+
+	var violations []auditvo.AuditViolation
+	for _, decl := range summary.Declarations {
+		if !nodeTypeAllowed(decl.NodeType, nodeTypes) {
+			continue
+		}
+
+		// Step 1: filter by supertype_kind.
+		candidates := decl.ParameterizedSupertypes
+		if supertypeKindFilter != "" {
+			filtered := candidates[:0:0]
+			for _, ps := range candidates {
+				if string(ps.Kind) == supertypeKindFilter {
+					filtered = append(filtered, ps)
+				}
+			}
+			candidates = filtered
+		}
+
+		// Step 2: filter by outer-glob match.
+		outerMatched := candidates[:0:0]
+		for _, ps := range candidates {
+			if matchOuterGlob(expectedOuter, ps.Outer) {
+				outerMatched = append(outerMatched, ps)
+			}
+		}
+
+		// Step 3: if no outer match → "actual=none" violation.
+		if len(outerMatched) == 0 {
+			ctx := map[string]string{
+				"file":               summary.Path,
+				"name":               decl.Name,
+				"expected_supertype": expectedSupertypeRaw,
+				"expected_arity":     expectedArityStr,
+				"actual":             "none",
+				"actual_arity":       "0",
+				"kind":               "",
+			}
+			violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctx))
+			continue
+		}
+
+		// Step 4: pick the first matching candidate.
+		c := outerMatched[0]
+		actual := c.Outer + "<" + strings.Join(c.TypeArgs, ",") + ">"
+		actualArity := strconv.Itoa(len(c.TypeArgs))
+		kindStr := string(c.Kind)
+
+		if len(c.TypeArgs) != expectedArity {
+			ctx := map[string]string{
+				"file":               summary.Path,
+				"name":               decl.Name,
+				"expected_supertype": expectedSupertypeRaw,
+				"expected_arity":     expectedArityStr,
+				"actual":             actual,
+				"actual_arity":       actualArity,
+				"kind":               kindStr,
+			}
+			violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctx))
+			continue
+		}
+
+		// Step 5: check per-slot arg globs.
+		slotViolation := false
+		for i, glob := range argGlobs {
+			if !matchInnerGlob(glob, c.TypeArgs[i]) {
+				slotViolation = true
+				break
+			}
+		}
+		if slotViolation {
+			ctx := map[string]string{
+				"file":               summary.Path,
+				"name":               decl.Name,
+				"expected_supertype": expectedSupertypeRaw,
+				"expected_arity":     expectedArityStr,
+				"actual":             actual,
+				"actual_arity":       actualArity,
+				"kind":               kindStr,
+			}
+			violations = append(violations, makeViolation(moduleID, summary, rule, 0, ctx))
+		}
+	}
+	return violations
 }

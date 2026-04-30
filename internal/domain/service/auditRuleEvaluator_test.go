@@ -1694,3 +1694,244 @@ func TestAuditEvaluator_MatchPathGlob(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// required_parameterized_supertype  (PC01US-008 / PC01RF-006 / PC01RF-009)
+// ---------------------------------------------------------------------------
+
+// requiredParameterizedSupertypeRule returns the canonical rule fixture for
+// PC01US-008: every class under application/usecase/ must implement
+// UseCase<I,O> with exactly two type arguments.
+func requiredParameterizedSupertypeRule() model.AuditRule {
+	return model.AuditRule{
+		ID:          "usecase-supertype",
+		Kind:        model.AuditKindRequiredParameterizedSupertype,
+		Severity:    model.AuditSeverityError,
+		Description: "class {name} must implement {expected_supertype}: expected_supertype={expected_supertype}, actual={actual}",
+		Suggestion:  "Declare `implements UseCase<I, O>` with two type arguments on {name}",
+		Params: map[string]string{
+			"path_scope":         "application/usecase/",
+			"expected_supertype": "UseCase<*,*>",
+		},
+	}
+}
+
+// TestEvaluateFile_RequiredParameterizedSupertype_MatchingSupertypePasses verifies
+// AC1: a class that declares implements UseCase<String,User> inside the scoped
+// path produces zero violations.
+func TestEvaluateFile_RequiredParameterizedSupertype_MatchingSupertypePasses(t *testing.T) {
+	t.Parallel()
+
+	rule := requiredParameterizedSupertypeRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/usecase/FindUser.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "FindUser",
+				ParameterizedSupertypes: []model.ParameterizedSupertype{
+					{Kind: model.SupertypeKindImplements, Outer: "UseCase", TypeArgs: []string{"String", "User"}},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "AC1: zero violations expected when class implements UseCase<String,User>")
+}
+
+// TestEvaluateFile_RequiredParameterizedSupertype_NoMatchingSupertypeFiresActualNone verifies
+// AC2: a class with no parameterized supertypes produces exactly one violation
+// whose message contains "expected_supertype=UseCase<*,*>, actual=none".
+func TestEvaluateFile_RequiredParameterizedSupertype_NoMatchingSupertypeFiresActualNone(t *testing.T) {
+	t.Parallel()
+
+	rule := requiredParameterizedSupertypeRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/usecase/FindUser.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:                "class_declaration",
+				Name:                    "FindUser",
+				Implements:              []string{},
+				Extends:                 []string{},
+				ParameterizedSupertypes: nil,
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "AC2: exactly one violation expected when class has no parameterized supertypes")
+	v := got[0]
+	require.Equal(t, model.AuditKindRequiredParameterizedSupertype, v.Kind,
+		"AC2: violation Kind must be AuditKindRequiredParameterizedSupertype")
+	require.Contains(t, v.Message, "expected_supertype=UseCase<*,*>, actual=none",
+		"AC2: violation message must contain the literal evidence substring")
+}
+
+// TestEvaluateFile_RequiredParameterizedSupertype_WrongArityFiresWithEvidence verifies
+// AC3: a class implementing UseCase<String> (arity 1) when arity 2 is required
+// produces exactly one violation with evidence for both the full actual form and
+// the numeric arity mismatch.
+func TestEvaluateFile_RequiredParameterizedSupertype_WrongArityFiresWithEvidence(t *testing.T) {
+	t.Parallel()
+
+	// First sub-test: template that surfaces the rebuilt actual form and both arities.
+	t.Run("full-evidence-template", func(t *testing.T) {
+		t.Parallel()
+
+		rule := model.AuditRule{
+			ID:          "usecase-supertype",
+			Kind:        model.AuditKindRequiredParameterizedSupertype,
+			Severity:    model.AuditSeverityError,
+			Description: "expected_arity={expected_arity}, actual={actual}, actual_arity={actual_arity}",
+			Suggestion:  "Fix {name}",
+			Params: map[string]string{
+				"path_scope":         "application/usecase/",
+				"expected_supertype": "UseCase<*,*>",
+			},
+		}
+		summary := model.JavaFileSummary{
+			Path: "src/main/java/com/acme/application/usecase/FindUser.java",
+			Declarations: []model.JavaDeclaration{
+				{
+					NodeType: "class_declaration",
+					Name:     "FindUser",
+					ParameterizedSupertypes: []model.ParameterizedSupertype{
+						{Kind: model.SupertypeKindImplements, Outer: "UseCase", TypeArgs: []string{"String"}},
+					},
+				},
+			},
+		}
+
+		got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+		require.Len(t, got, 1, "AC3: exactly one violation expected for wrong arity")
+		require.Contains(t, got[0].Message, "expected_arity=2, actual=UseCase<String>, actual_arity=1",
+			"AC3: violation evidence must surface rebuilt actual form and both arities")
+	})
+
+	// Second sub-test: template that produces the literal AC3 phrase
+	// "expected_arity=2, actual=1".
+	t.Run("ac3-literal-phrase", func(t *testing.T) {
+		t.Parallel()
+
+		rule := model.AuditRule{
+			ID:          "usecase-supertype-ac3",
+			Kind:        model.AuditKindRequiredParameterizedSupertype,
+			Severity:    model.AuditSeverityError,
+			Description: "expected_arity={expected_arity}, actual={actual_arity}",
+			Suggestion:  "Fix {name}",
+			Params: map[string]string{
+				"path_scope":         "application/usecase/",
+				"expected_supertype": "UseCase<*,*>",
+			},
+		}
+		summary := model.JavaFileSummary{
+			Path: "src/main/java/com/acme/application/usecase/FindUser.java",
+			Declarations: []model.JavaDeclaration{
+				{
+					NodeType: "class_declaration",
+					Name:     "FindUser",
+					ParameterizedSupertypes: []model.ParameterizedSupertype{
+						{Kind: model.SupertypeKindImplements, Outer: "UseCase", TypeArgs: []string{"String"}},
+					},
+				},
+			},
+		}
+
+		got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+		require.Len(t, got, 1, "AC3: exactly one violation expected for wrong arity")
+		require.Contains(t, got[0].Message, "expected_arity=2, actual=1",
+			"AC3: literal phrase 'expected_arity=2, actual=1' must appear in the message")
+	})
+}
+
+// TestEvaluateFile_RequiredParameterizedSupertype_NonParameterizedSupertypeIsIgnored verifies
+// Q1: a class that implements only a non-parameterized interface (Runnable) has
+// no ParameterizedSupertypes and must produce one violation with actual=none.
+func TestEvaluateFile_RequiredParameterizedSupertype_NonParameterizedSupertypeIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	rule := requiredParameterizedSupertypeRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/usecase/FindUser.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:                "class_declaration",
+				Name:                    "FindUser",
+				Implements:              []string{"Runnable"},
+				ParameterizedSupertypes: nil,
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "one violation expected: bare-name Runnable does not satisfy the parameterized rule")
+	require.Contains(t, got[0].Message, "actual=none",
+		"non-parameterized supertype must not match; actual must be 'none'")
+}
+
+// TestEvaluateFile_RequiredParameterizedSupertype_PathScopeMiss verifies that a
+// file under src/test/java/... is outside the rule's path_scope and produces
+// zero violations.
+func TestEvaluateFile_RequiredParameterizedSupertype_PathScopeMiss(t *testing.T) {
+	t.Parallel()
+
+	rule := requiredParameterizedSupertypeRule()
+	summary := model.JavaFileSummary{
+		// path_scope is "application/usecase/" — test-layer file is outside that scope.
+		Path: "src/test/java/com/acme/service/FindUserTest.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType:                "class_declaration",
+				Name:                    "FindUserTest",
+				ParameterizedSupertypes: nil,
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "rule must not fire for files outside path_scope")
+}
+
+// TestEvaluateFile_RequiredParameterizedSupertype_OuterGlobMatchesScopedFQN verifies
+// Q4: an outer glob of "*.UseCase" (from expected_supertype "*.UseCase<*,*>")
+// matches a scoped Outer like "port.in.UseCase" via suffix-match, producing zero
+// violations.
+func TestEvaluateFile_RequiredParameterizedSupertype_OuterGlobMatchesScopedFQN(t *testing.T) {
+	t.Parallel()
+
+	rule := model.AuditRule{
+		ID:          "usecase-supertype-fqn",
+		Kind:        model.AuditKindRequiredParameterizedSupertype,
+		Severity:    model.AuditSeverityError,
+		Description: "class {name} must implement {expected_supertype}: expected_supertype={expected_supertype}, actual={actual}",
+		Suggestion:  "Fix {name}",
+		Params: map[string]string{
+			"path_scope":         "application/usecase/",
+			"expected_supertype": "*.UseCase<*,*>",
+		},
+	}
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/application/usecase/FindUser.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "FindUser",
+				ParameterizedSupertypes: []model.ParameterizedSupertype{
+					{Kind: model.SupertypeKindImplements, Outer: "port.in.UseCase", TypeArgs: []string{"String", "User"}},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "outer glob '*.UseCase' must match scoped FQN 'port.in.UseCase' via suffix-match")
+}
