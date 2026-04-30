@@ -47,6 +47,8 @@ func (e *AuditEvaluator) EvaluateFile(
 			got = evalForbiddenAnnotations(moduleID, summary, rule)
 		case model.AuditKindMethodNaming:
 			got = evalMethodNaming(moduleID, summary, rule)
+		case model.AuditKindForbiddenFieldTypePattern:
+			got = evalForbiddenFieldTypePattern(moduleID, summary, rule)
 		default:
 			// Unknown kinds are skipped — the loader is responsible for
 			// rejecting unknown kinds; the evaluator must be defensive.
@@ -802,4 +804,132 @@ func evalMethodNaming(
 		}
 	}
 	return violations
+}
+
+// evalForbiddenFieldTypePattern — params:
+//
+//	"path_scope":              substring restricting which files this rule applies to
+//	                           (e.g. "src/main/java/"). REQUIRED.
+//	"forbidden_type_patterns": comma-joined list of "Outer<Inner>" patterns where
+//	                           Inner may contain a single "*" glob. REQUIRED.
+//	"node_types":              optional comma-joined list of declaration node types.
+//	                           Default "class_declaration".
+//	"exempt_paths":            optional comma-joined list of forward-slash globs.
+//	                           Any match exempts the file from this rule.
+//
+// Substitution context (per emitted violation):
+//
+//	{file}            — summary.Path
+//	{name}            — declaration simple name
+//	{field_name}      — field simple name
+//	{type}            — resolved FQN of outer + "<" + inner + ">"
+//	{matched_pattern} — the pattern that caused the match
+//
+// PC01RF-005 (parameterized type-argument matching), PC01RF-009 (evidence-rich
+// messages), PC01RNF-001 (engine language-neutrality), PC01RNF-003 (deterministic).
+func evalForbiddenFieldTypePattern(
+	moduleID string, summary model.JavaFileSummary, rule model.AuditRule,
+) []auditvo.AuditViolation {
+	pathScope := rule.Params["path_scope"]
+	patterns := splitNonEmpty(rule.Params["forbidden_type_patterns"])
+	if pathScope == "" || len(patterns) == 0 {
+		return nil
+	}
+	if !strings.Contains(summary.Path, pathScope) {
+		return nil
+	}
+	if pathExempt(rule, summary.Path) {
+		return nil
+	}
+
+	nodeTypes := splitNonEmpty(rule.Params["node_types"])
+	if len(nodeTypes) == 0 {
+		nodeTypes = []string{"class_declaration"}
+	}
+
+	var violations []auditvo.AuditViolation
+	for _, decl := range summary.Declarations {
+		if !nodeTypeAllowed(decl.NodeType, nodeTypes) {
+			continue
+		}
+		for _, field := range decl.Fields {
+			for _, pattern := range patterns {
+				outer, inner, matched := matchTypePattern(field.Type, pattern)
+				if !matched {
+					continue
+				}
+				fqnOuter := resolveFQN(outer, summary.Imports)
+				typeStr := fqnOuter + "<" + inner + ">"
+				ctx := map[string]string{
+					"file":            summary.Path,
+					"name":            decl.Name,
+					"field_name":      field.Name,
+					"type":            typeStr,
+					"matched_pattern": pattern,
+				}
+				violations = append(violations, makeViolation(moduleID, summary, rule, field.Line, ctx))
+				break // one violation per field (first matched pattern wins)
+			}
+		}
+	}
+	return violations
+}
+
+// matchTypePattern parses a parameterized field type (e.g. "List<OrderEntity>")
+// and a pattern (e.g. "List<*Entity>"), then reports whether the outer type
+// matches exactly and the inner type matches the glob. Non-parameterized field
+// types (no angle brackets) return matched=false. Pattern without brackets also
+// returns matched=false.
+//
+// Return values:
+//
+//	outer   — the outer type name (trimmed), even on no-match
+//	inner   — the inner type argument (trimmed), empty when no brackets in fieldType
+//	matched — true only when outer equals outerPat AND inner matches the innerPat glob
+func matchTypePattern(fieldType, pattern string) (outer, inner string, matched bool) {
+	firstLT := strings.Index(fieldType, "<")
+	lastGT := strings.LastIndex(fieldType, ">")
+	if firstLT < 0 || lastGT < 0 || lastGT <= firstLT {
+		return strings.TrimSpace(fieldType), "", false
+	}
+	outer = strings.TrimSpace(fieldType[:firstLT])
+	inner = strings.TrimSpace(fieldType[firstLT+1 : lastGT])
+
+	patFirstLT := strings.Index(pattern, "<")
+	patLastGT := strings.LastIndex(pattern, ">")
+	if patFirstLT < 0 || patLastGT < 0 || patLastGT <= patFirstLT {
+		return outer, inner, false
+	}
+	outerPat := strings.TrimSpace(pattern[:patFirstLT])
+	innerPat := strings.TrimSpace(pattern[patFirstLT+1 : patLastGT])
+
+	if outer != outerPat {
+		return outer, inner, false
+	}
+
+	// Glob match on inner.
+	switch {
+	case innerPat == "*":
+		matched = true
+	case strings.HasPrefix(innerPat, "*"):
+		matched = strings.HasSuffix(inner, innerPat[1:])
+	case strings.HasSuffix(innerPat, "*"):
+		matched = strings.HasPrefix(inner, innerPat[:len(innerPat)-1])
+	default:
+		matched = inner == innerPat
+	}
+	return outer, inner, matched
+}
+
+// resolveFQN resolves a simple class name to a fully-qualified name using the
+// file's import list. Returns simple unchanged when no matching import is found.
+// No java.lang.* synthesis — profile authors must supply explicit imports.
+// PC01RF-005, Q3.
+func resolveFQN(simple string, imports []string) string {
+	for _, imp := range imports {
+		if i := strings.LastIndex(imp, "."); i >= 0 && imp[i+1:] == simple {
+			return imp
+		}
+	}
+	return simple
 }

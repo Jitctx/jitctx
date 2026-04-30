@@ -35,6 +35,12 @@ const (
 	// exemptions are honoured via params["exempt_paths"].
 	// PC01RF-004, PC01RF-009.
 	AuditKindMethodNaming AuditRuleKind = "method_naming"
+
+	// AuditKindForbiddenFieldTypePattern flags fields whose type matches any
+	// of the configured "Outer<Inner>" patterns. Inner supports a single
+	// "*" glob (suffix/prefix/full wildcard). Non-parameterized field types
+	// are silently skipped (Q4 of plan §8). PC01RF-005.
+	AuditKindForbiddenFieldTypePattern AuditRuleKind = "forbidden_field_type_pattern"
 )
 
 // AuditSeverity is the severity badge attached to a violation.

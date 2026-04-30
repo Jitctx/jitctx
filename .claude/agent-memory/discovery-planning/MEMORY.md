@@ -1,0 +1,9 @@
+- [jitctx-shape](projectJitctxShape.md) — jitctx is a single-stream Go CLI; discovery output is one plan.md with Sections 0-9 (no backend/frontend split).
+- [token-heuristic](feedbackTokenHeuristic.md) — requirements.md's `words*1.3` wins over CLAUDE.md's `runes/4` when they disagree; always reconcile in the contract.
+- [filename-camelcase](feedbackCamelCaseFiles.md) — Go files in this repo use camelCase (loadManifestPort.go), not snake_case; underscores reserved for Go toolchain suffixes.
+- [ports-isp](projectIspPorts.md) — domain ports are strictly ISP (one method per file); filenames like `loadManifestPort.go` live in context subfolders (`port/manifest/`, `port/profile/`, etc.).
+- [plans-dir](referencePlansDir.md) — implementation plans live at `.claude/plans/{feature-id}/plan.md` as a SINGLE markdown file with Sections 0-9 (not split into contract/backend/frontend).
+- [EP-02 progress](project_ep02_progress.md) — EP-02 user story plan status; US-005 plan landed 2026-04-25 (introduces Package field, fsscaffold pkg, ScaffoldConflictError).
+- [EP-03 progress](project_ep03_progress.md) — EP-03 user story plan status; US-007 plan landed 2026-04-26 as a tests-only ratification (production code already satisfies AC).
+- [EP-04 progress](project_ep04_progress.md) — EP-04 user story plan status; US-002 plan landed 2026-04-26 (declarative classifier engine; runs parallel to EP-03 path until US-003 grafts it onto BuildModules).
+- [PC01 progress](projectPc01Progress.md) — quality-gate-evaluators epic status; US-007 plan landed 2026-04-29 (forbidden_field_type_pattern kind; engine-neutrality grep gate enforced).

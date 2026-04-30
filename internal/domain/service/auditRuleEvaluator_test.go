@@ -1436,6 +1436,193 @@ func TestAuditEvaluator_RequiredAnnotations_NoExpectedValues_BehavesLikeBefore(t
 // does NOT match the evaluator returns one violation. This exercises the full
 // matchPathGlob / matchSegments logic without needing direct access to the
 // unexported function.
+// ---------------------------------------------------------------------------
+// forbidden_field_type_pattern  (PC01US-007 / PC01RF-005 / PC01RF-009)
+// ---------------------------------------------------------------------------
+
+// domainNoEntityCollectionRule returns the canonical rule fixture for PC01US-007:
+// "Domain model field {field_name} carries forbidden collection".
+func domainNoEntityCollectionRule() model.AuditRule {
+	return model.AuditRule{
+		ID:          "domain-no-entity-collection",
+		Kind:        model.AuditKindForbiddenFieldTypePattern,
+		Severity:    model.AuditSeverityError,
+		Description: "Domain model field {field_name} carries forbidden collection: type={type}, matched_pattern={matched_pattern}",
+		Suggestion:  "Replace {type} with a non-entity collection or a domain VO",
+		Params: map[string]string{
+			"path_scope":              "src/main/java/",
+			"forbidden_type_patterns": "List<*Entity>,Set<*Entity>",
+			"node_types":              "class_declaration",
+		},
+	}
+}
+
+func TestAuditEvaluator_ForbiddenFieldTypePattern_NonEntityCollection_NoViolation(t *testing.T) {
+	t.Parallel()
+	// AC1: a field of type List<String> does NOT match List<*Entity> because
+	// "String" does not end with "Entity". Zero violations expected.
+
+	rule := domainNoEntityCollectionRule()
+	summary := model.JavaFileSummary{
+		Path:    "src/main/java/com/acme/domain/Tag.java",
+		Imports: []string{"java.util.List"},
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Tag",
+				Fields: []model.JavaField{
+					{Name: "tags", Type: "List<String>", Line: 7},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "AC1: List<String> must not match List<*Entity>")
+}
+
+func TestAuditEvaluator_ForbiddenFieldTypePattern_ListOfEntity_FlagsWithFqnAndPatternEvidence(t *testing.T) {
+	t.Parallel()
+	// AC2: a field of type List<OrderEntity> WITH import java.util.List must
+	// produce exactly one violation. The message must contain the literal
+	// AC2 substring "type=java.util.List<OrderEntity>, matched_pattern=List<*Entity>".
+
+	rule := domainNoEntityCollectionRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/domain/Order.java",
+		Imports: []string{
+			"java.util.List",
+			"com.acme.domain.OrderEntity",
+		},
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Order",
+				Fields: []model.JavaField{
+					{Name: "orders", Type: "List<OrderEntity>", Line: 9},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "AC2: exactly one violation expected for List<OrderEntity>")
+	require.Equal(t, 9, got[0].Line, "AC2: violation must be on field line 9")
+	require.Contains(t, got[0].Message,
+		"type=java.util.List<OrderEntity>, matched_pattern=List<*Entity>",
+		"AC2: violation evidence must surface FQN type and matched pattern verbatim")
+}
+
+func TestAuditEvaluator_ForbiddenFieldTypePattern_SetOfEntity_ReportsFieldLine(t *testing.T) {
+	t.Parallel()
+	// AC3: a field of type Set<UserEntity> must produce exactly one violation
+	// whose Line equals the field's line number (11). The message must contain
+	// evidence for both the type and the matched pattern.
+
+	rule := domainNoEntityCollectionRule()
+	summary := model.JavaFileSummary{
+		Path:    "src/main/java/com/acme/domain/User.java",
+		Imports: []string{"java.util.Set"},
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "User",
+				Fields: []model.JavaField{
+					{Name: "users", Type: "Set<UserEntity>", Line: 11},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "AC3: exactly one violation expected for Set<UserEntity>")
+	require.Equal(t, 11, got[0].Line,
+		"AC3: violation Line must equal the field's line (11)")
+	require.Contains(t, got[0].Message, "type=java.util.Set<UserEntity>",
+		"AC3: violation evidence must surface the resolved FQN type")
+	require.Contains(t, got[0].Message, "matched_pattern=Set<*Entity>",
+		"AC3: violation evidence must surface the matched pattern")
+}
+
+func TestAuditEvaluator_ForbiddenFieldTypePattern_NonParameterizedType_Skipped(t *testing.T) {
+	t.Parallel()
+	// Non-parameterized field types (no angle brackets) must be silently skipped.
+	// A field of type "String" against pattern "List<*Entity>" must produce zero violations.
+
+	rule := domainNoEntityCollectionRule()
+	summary := model.JavaFileSummary{
+		Path: "src/main/java/com/acme/domain/Foo.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Foo",
+				Fields: []model.JavaField{
+					{Name: "x", Type: "String", Line: 5},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "non-parameterized field type must not produce violations")
+}
+
+func TestAuditEvaluator_ForbiddenFieldTypePattern_OutsidePathScope_Skipped(t *testing.T) {
+	t.Parallel()
+	// A file whose path does not contain path_scope ("src/main/java/") must
+	// produce zero violations even when its field type matches the pattern.
+
+	rule := domainNoEntityCollectionRule()
+	summary := model.JavaFileSummary{
+		Path: "src/test/java/com/acme/domain/Foo.java",
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Foo",
+				Fields: []model.JavaField{
+					{Name: "orders", Type: "List<OrderEntity>", Line: 3},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Empty(t, got, "rule must not fire for files outside path_scope")
+}
+
+func TestAuditEvaluator_ForbiddenFieldTypePattern_ImportNotFound_FallsBackToSimpleName(t *testing.T) {
+	t.Parallel()
+	// When no import resolves the outer type, resolveFQN falls back to the
+	// simple name. The violation must still fire and the message must contain
+	// "type=List<OrderEntity>" (no FQN prefix), proving the fallback behaviour.
+
+	rule := domainNoEntityCollectionRule()
+	summary := model.JavaFileSummary{
+		Path:    "src/main/java/com/acme/domain/Order.java",
+		Imports: []string{"com.acme.domain.OrderEntity"}, // java.util.List is intentionally absent
+		Declarations: []model.JavaDeclaration{
+			{
+				NodeType: "class_declaration",
+				Name:     "Order",
+				Fields: []model.JavaField{
+					{Name: "orders", Type: "List<OrderEntity>", Line: 6},
+				},
+			},
+		},
+	}
+
+	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
+
+	require.Len(t, got, 1, "violation must fire even when the import for the outer type is absent")
+	require.Contains(t, got[0].Message, "type=List<OrderEntity>",
+		"when no import resolves, message must carry simple name (no FQN prefix)")
+}
+
 func TestAuditEvaluator_MatchPathGlob(t *testing.T) {
 	t.Parallel()
 
