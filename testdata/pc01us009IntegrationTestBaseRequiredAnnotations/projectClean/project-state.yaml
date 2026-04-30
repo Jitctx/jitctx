@@ -1,0 +1,19 @@
+schema_version: 2
+generated_at: 2026-04-30T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: com.acme.it
+    path: src/main/java/com/acme/it
+    tags: []
+    contracts:
+      - name: BaseIntegrationTest
+        types:
+          - service
+        path: src/main/java/com/acme/it/BaseIntegrationTest.java
+        methods: []
+    dependencies: []
+contexts: []
