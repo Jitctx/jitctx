@@ -80,6 +80,8 @@ type bundleAuditRuleDTO struct {
 	Description string            `yaml:"description"`
 	Suggestion  string            `yaml:"suggestion"`
 	Params      map[string]string `yaml:"params"`
+	// PC01US-012: legacy backward-compat shortcut. See dto.go.
+	HasAnnotation string `yaml:"has_annotation"`
 }
 
 // bundleClassificationDTO mirrors model.ClassificationRule one-to-one.

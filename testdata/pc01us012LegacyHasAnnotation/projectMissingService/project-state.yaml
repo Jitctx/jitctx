@@ -1,0 +1,19 @@
+schema_version: 2
+generated_at: 2026-04-30T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: com.acme.application.usecase
+    path: src/main/java/com/acme/application/usecase
+    tags: []
+    contracts:
+      - name: PlaceOrder
+        types:
+          - service
+        path: src/main/java/com/acme/application/usecase/PlaceOrder.java
+        methods: []
+    dependencies: []
+contexts: []

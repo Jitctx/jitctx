@@ -43,6 +43,11 @@ type auditRuleDTO struct {
 	Description string            `yaml:"description"`
 	Suggestion  string            `yaml:"suggestion"`
 	Params      map[string]string `yaml:"params"`
+	// PC01US-012: legacy backward-compat shortcut. When non-empty,
+	// translateLegacyHasAnnotation rewrites Kind to
+	// "required_annotations" and Params["annotations"] to this
+	// value. See legacyHasAnnotation.go.
+	HasAnnotation string `yaml:"has_annotation"`
 }
 
 type matchDTO struct {

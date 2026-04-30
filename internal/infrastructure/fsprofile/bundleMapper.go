@@ -135,10 +135,18 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte, logger *slog.Log
 	// dropped with a WARN log; unknown severities are fatal.
 	rawAuditRules := make([]model.AuditRule, 0, len(dto.AuditRules))
 	for _, d := range dto.AuditRules {
-		kind := model.AuditRuleKind(d.Kind)
+		// PC01US-012 — legacy shortcut translation. Runs FIRST so a
+		// legacy `has_annotation: X` rule reaches the kind whitelist
+		// already wearing kind=required_annotations and
+		// params.annotations=X.
+		effKind, effParams, _ := translateLegacyHasAnnotation(
+			d.Kind, d.HasAnnotation, d.Params,
+		)
+
+		kind := model.AuditRuleKind(effKind)
 		if !knownAuditRuleKinds[kind] {
 			logger.Warn("unknown audit rule kind in bundle profile, dropping rule",
-				slog.String("kind", d.Kind),
+				slog.String("kind", effKind),
 				slog.String("rule_id", d.ID),
 				slog.String("profile", dto.Name),
 			)
@@ -149,11 +157,11 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte, logger *slog.Log
 			return nil, fmt.Errorf("bundle profile %q: audit rule %q: unknown severity %q: %w",
 				dto.Name, d.ID, d.Severity, domerr.ErrProfileInvalid)
 		}
-		// PC01US-011: per-kind structural validation. Validation runs AFTER
-		// the kind whitelist and severity whitelist (so fatals fire only on
-		// recognised kinds) and BEFORE the model.AuditRule conversion.
+		// PC01US-011: per-kind structural validation. Note: now driven
+		// by effKind/effParams so the validator sees the post-translation
+		// shape.
 		if err := validateAuditRuleParams(auditRuleSchema{
-			ID: d.ID, Kind: d.Kind, Params: d.Params,
+			ID: d.ID, Kind: effKind, Params: effParams,
 		}); err != nil {
 			return nil, fmt.Errorf("bundle profile %q: audit rule %q: %w: %w",
 				dto.Name, d.ID, err, domerr.ErrProfileInvalid)
@@ -164,7 +172,7 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte, logger *slog.Log
 			Severity:    sev,
 			Description: d.Description,
 			Suggestion:  d.Suggestion,
-			Params:      d.Params,
+			Params:      effParams,
 		})
 	}
 

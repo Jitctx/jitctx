@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PC01US-012 fixture pom.xml. Used by the spring-boot-hexagonal
+  profile's `detect` rule (looks for org.springframework.boot in
+  pom.xml) so the audit pipeline classifies this fixture as a
+  spring-boot project and applies the audit rules.
+-->
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.acme</groupId>
+  <artifactId>pc01us012-fixture</artifactId>
+  <version>0.0.1</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+      <version>3.2.0</version>
+    </dependency>
+  </dependencies>
+</project>

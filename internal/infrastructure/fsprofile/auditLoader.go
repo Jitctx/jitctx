@@ -56,10 +56,16 @@ func (l *Loader) LoadAuditRules(ctx context.Context, profileName string) ([]mode
 
 	var rules []model.AuditRule
 	for _, d := range dto.AuditRules {
-		kind := model.AuditRuleKind(d.Kind)
+		// PC01US-012 — legacy shortcut translation. Runs FIRST so the
+		// translated rule satisfies all downstream gates uniformly.
+		effKind, effParams, _ := translateLegacyHasAnnotation(
+			d.Kind, d.HasAnnotation, d.Params,
+		)
+
+		kind := model.AuditRuleKind(effKind)
 		if !knownAuditRuleKinds[kind] {
 			l.logger.Warn("unknown audit rule kind in profile, dropping rule",
-				slog.String("kind", d.Kind),
+				slog.String("kind", effKind),
 				slog.String("rule_id", d.ID),
 				slog.String("profile", profileName),
 			)
@@ -73,9 +79,10 @@ func (l *Loader) LoadAuditRules(ctx context.Context, profileName string) ([]mode
 		// PC01US-011: per-kind structural validation. Same helper used by
 		// bundleMapper.toBundleDomain (defence in depth — the legacy
 		// single-file profile load path should produce the same fatals as
-		// the EP-04 directory path).
+		// the EP-04 directory path). Now driven by effKind/effParams so
+		// the validator sees the post-translation shape.
 		if err := validateAuditRuleParams(auditRuleSchema{
-			ID: d.ID, Kind: d.Kind, Params: d.Params,
+			ID: d.ID, Kind: effKind, Params: effParams,
 		}); err != nil {
 			return nil, fmt.Errorf("profile %q: audit rule %q: %w: %w",
 				profileName, d.ID, err, domerr.ErrProfileInvalid)
@@ -86,7 +93,7 @@ func (l *Loader) LoadAuditRules(ctx context.Context, profileName string) ([]mode
 			Severity:    sev,
 			Description: d.Description,
 			Suggestion:  d.Suggestion,
-			Params:      d.Params,
+			Params:      effParams,
 		})
 	}
 	if rules == nil {

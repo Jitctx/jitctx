@@ -381,3 +381,40 @@ func TestAuditCmd_Integration_ReadOnly_DisabledRules(t *testing.T) {
 	require.Equal(t, before, after,
 		"audit must not modify any file in the project tree (RNF-002 read-only guarantee)")
 }
+
+// ─── PC01US-012 — legacy has_annotation shortcut ─────────────────────────────
+
+// TestAuditCmd_Integration_PC01US012_LegacyHasAnnotation_FlagsMissing
+// is the AC1 fixture for PC01US-012. The profile uses the legacy
+// `has_annotation: Service` shortcut on a class that does NOT
+// declare @Service; the audit must flag exactly one missing-Service
+// violation.
+func TestAuditCmd_Integration_PC01US012_LegacyHasAnnotation_FlagsMissing(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	copyFixture(t, fixtureDir(t,
+		"pc01us012LegacyHasAnnotation", "projectMissingService"), workDir)
+
+	manifestPath := filepath.Join(workDir, "project-state.yaml")
+	stdout, _, run := newAuditCmdFor(t, workDir, manifestPath)
+
+	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
+
+	// The legacy `has_annotation: Service` rule MUST fire on
+	// PlaceOrder.java with evidence equivalent to the modern
+	// `required_annotations:[Service]` shape — i.e. the violation
+	// stdout contains `missing=[Service]` and references the
+	// offending class file. This is the AC1 contract for PC01US-012:
+	// the legacy shortcut produces the same observable output as
+	// the modern rule. The audit command does NOT exit non-zero on
+	// ERROR-severity violations — see the existing auditViolations
+	// integration test for the same posture.
+	out := stdout.String()
+	require.Contains(t, out, "missing=[Service]",
+		"evidence must show Service is the missing annotation")
+	require.Contains(t, out, "PlaceOrder.java",
+		"violation must reference the offending class file")
+	require.Contains(t, out, "[legacy-service-required]",
+		"violation must reference the legacy rule id verbatim")
+}

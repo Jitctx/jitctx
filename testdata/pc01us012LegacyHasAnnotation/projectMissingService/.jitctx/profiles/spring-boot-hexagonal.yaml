@@ -1,0 +1,34 @@
+name: spring-boot-hexagonal
+languages: [java]
+query_lang: java
+
+# Auto-detection.
+detect:
+  files:
+    - name: pom.xml
+      contains: "org.springframework.boot"
+
+module_detection:
+  strategy: hexagonal
+  roots:
+    - src/main/java/**
+
+rules:
+  - match:
+      node_type: class_declaration
+      has_annotation: Service
+    classify_as: service
+
+audit_rules:
+  # PC01US-012 — legacy `has_annotation:` shortcut (no `kind:` field).
+  # The infrastructure loader translates this into the modern
+  # `kind: required_annotations` + `params.annotations: Service`
+  # shape BEFORE the kind whitelist and PC01US-011 schema validator
+  # run. Per PC01RF-012, this transition is silent (no warning).
+  - id: legacy-service-required
+    has_annotation: Service
+    severity: ERROR
+    description: '{name}: {evidence}'
+    suggestion: 'Annotate {name} with @Service'
+    params:
+      path_scope: src/main/java/com/acme/application/usecase/
