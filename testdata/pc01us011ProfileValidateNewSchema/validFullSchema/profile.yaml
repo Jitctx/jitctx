@@ -1,0 +1,57 @@
+name: pc01us011-valid-full-schema
+language: java
+types: []
+audit_rules:
+  # required_annotations
+  - id: ra-1
+    kind: required_annotations
+    severity: ERROR
+    description: 'all-of presence rule'
+    suggestion: 'declare {required}'
+    params:
+      path_scope: src/main/java/com/acme/application/
+      annotations: 'A,B'
+
+  # forbidden_annotations (target=field encoding for "field_rules")
+  - id: fa-1
+    kind: forbidden_annotations
+    severity: ERROR
+    description: 'forbidden field annotation'
+    suggestion: 'remove {forbidden}'
+    params:
+      path_scope: src/main/java/
+      annotations: 'C'
+      target: field
+
+  # method_naming (encoding for "method_rules")
+  - id: mn-1
+    kind: method_naming
+    severity: WARNING
+    description: 'naming pattern'
+    suggestion: 'rename method to match pattern'
+    params:
+      path_scope: src/test/java/
+      triggered_by: 'D'
+      name_pattern: '^should[A-Z].*'
+
+  # required_parameterized_supertype (encoding for "supertype_rules")
+  - id: rps-1
+    kind: required_parameterized_supertype
+    severity: ERROR
+    description: 'parameterized supertype'
+    suggestion: 'extend the parameterized base'
+    params:
+      path_scope: src/main/java/com/acme/application/usecase/
+      supertype_kind: implements
+      implements_glob: '*UseCase'
+      args: '*,*'
+
+  # forbidden_field_type_pattern (encoding for "forbidden_field_types")
+  - id: ffp-1
+    kind: forbidden_field_type_pattern
+    severity: ERROR
+    description: 'forbidden parameterized field type'
+    suggestion: 'replace with a domain-pure type'
+    params:
+      path_scope: src/main/java/com/acme/domain/
+      forbidden_type_patterns: 'List<*Entity>'

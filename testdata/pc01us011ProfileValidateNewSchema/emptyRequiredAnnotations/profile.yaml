@@ -1,0 +1,12 @@
+name: pc01us011-empty-required-annotations
+language: java
+types: []
+audit_rules:
+  - id: X
+    kind: required_annotations
+    severity: ERROR
+    description: 'PC01US-011 AC1 fixture'
+    suggestion: 'declare at least one annotation'
+    params:
+      path_scope: src/
+      annotations: ''

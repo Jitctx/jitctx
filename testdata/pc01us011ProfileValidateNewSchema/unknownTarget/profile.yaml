@@ -1,0 +1,13 @@
+name: pc01us011-unknown-target
+language: java
+types: []
+audit_rules:
+  - id: X
+    kind: forbidden_annotations
+    severity: ERROR
+    description: 'PC01US-011 AC2 fixture'
+    suggestion: 'use a known target value'
+    params:
+      path_scope: src/
+      annotations: 'Some'
+      target: foo

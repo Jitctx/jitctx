@@ -145,3 +145,69 @@ func TestProfileValidate_DuplicateTypeIds_ExitsOne(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "duplicate type id: service")
 }
+
+// TestProfileValidate_PC01US011_EmptyRequiredAnnotations_ExitsOne verifies
+// that a rule declaring required_annotations as an empty list causes the
+// command to return an error whose message contains the canonical literal.
+// PC01US-011 / AC1.
+func TestProfileValidate_PC01US011_EmptyRequiredAnnotations_ExitsOne(t *testing.T) {
+	t.Parallel()
+
+	fixture := fixtureDir(t, "pc01us011ProfileValidateNewSchema", "emptyRequiredAnnotations")
+
+	cmd := buildProfileValidateCmd(t)
+
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{fixture})
+
+	err := cmd.ExecuteContext(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(),
+		"rule 'X': required_annotations must declare at least one annotation")
+}
+
+// TestProfileValidate_PC01US011_UnknownTarget_ExitsOne verifies that a rule
+// whose target field contains an unrecognised value causes the command to
+// return an error whose message contains the canonical literal.
+// PC01US-011 / AC2.
+func TestProfileValidate_PC01US011_UnknownTarget_ExitsOne(t *testing.T) {
+	t.Parallel()
+
+	fixture := fixtureDir(t, "pc01us011ProfileValidateNewSchema", "unknownTarget")
+
+	cmd := buildProfileValidateCmd(t)
+
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{fixture})
+
+	err := cmd.ExecuteContext(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(),
+		"rule 'X': target must be one of [class, field, method, supertype]")
+}
+
+// TestProfileValidate_PC01US011_ValidFullSchema_ExitsZero verifies that a
+// profile using the full new-schema rule fields (target, trigger_annotation,
+// required_annotations, expected_values, method_name_pattern, supertype)
+// passes validation cleanly.
+// PC01US-011 / AC3.
+func TestProfileValidate_PC01US011_ValidFullSchema_ExitsZero(t *testing.T) {
+	t.Parallel()
+
+	fixture := fixtureDir(t, "pc01us011ProfileValidateNewSchema", "validFullSchema")
+
+	cmd := buildProfileValidateCmd(t)
+
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{fixture})
+
+	err := cmd.ExecuteContext(context.Background())
+	require.NoError(t, err, "valid full-schema profile must validate cleanly")
+	require.Contains(t, stdout.String(), "Profile valid")
+}

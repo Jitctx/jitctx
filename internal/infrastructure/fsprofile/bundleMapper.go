@@ -149,6 +149,15 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte, logger *slog.Log
 			return nil, fmt.Errorf("bundle profile %q: audit rule %q: unknown severity %q: %w",
 				dto.Name, d.ID, d.Severity, domerr.ErrProfileInvalid)
 		}
+		// PC01US-011: per-kind structural validation. Validation runs AFTER
+		// the kind whitelist and severity whitelist (so fatals fire only on
+		// recognised kinds) and BEFORE the model.AuditRule conversion.
+		if err := validateAuditRuleParams(auditRuleSchema{
+			ID: d.ID, Kind: d.Kind, Params: d.Params,
+		}); err != nil {
+			return nil, fmt.Errorf("bundle profile %q: audit rule %q: %w: %w",
+				dto.Name, d.ID, err, domerr.ErrProfileInvalid)
+		}
 		rawAuditRules = append(rawAuditRules, model.AuditRule{
 			ID:          d.ID,
 			Kind:        kind,

@@ -70,6 +70,16 @@ func (l *Loader) LoadAuditRules(ctx context.Context, profileName string) ([]mode
 			return nil, fmt.Errorf("profile %q: audit rule %q: unknown severity %q: %w",
 				profileName, d.ID, d.Severity, domerr.ErrProfileInvalid)
 		}
+		// PC01US-011: per-kind structural validation. Same helper used by
+		// bundleMapper.toBundleDomain (defence in depth — the legacy
+		// single-file profile load path should produce the same fatals as
+		// the EP-04 directory path).
+		if err := validateAuditRuleParams(auditRuleSchema{
+			ID: d.ID, Kind: d.Kind, Params: d.Params,
+		}); err != nil {
+			return nil, fmt.Errorf("profile %q: audit rule %q: %w: %w",
+				profileName, d.ID, err, domerr.ErrProfileInvalid)
+		}
 		rules = append(rules, model.AuditRule{
 			ID:          d.ID,
 			Kind:        kind,
