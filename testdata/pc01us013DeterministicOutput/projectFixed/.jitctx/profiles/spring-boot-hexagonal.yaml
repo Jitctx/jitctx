@@ -1,0 +1,43 @@
+name: spring-boot-hexagonal
+languages: [java]
+query_lang: java
+
+# Auto-detection.
+detect:
+  files:
+    - name: pom.xml
+      contains: "org.springframework.boot"
+
+module_detection:
+  strategy: hexagonal
+  roots:
+    - src/main/java/**
+
+rules:
+  - match:
+      node_type: class_declaration
+      has_annotation: Service
+    classify_as: service
+
+audit_rules:
+  # Declared FIRST in YAML; sorts SECOND alphabetically (B > A).
+  # PC01US-013: exercises the comparator's ascending-RuleID tiebreaker.
+  - id: B-pc01us013-required-component
+    kind: required_annotations
+    severity: ERROR
+    description: '{name}: {evidence}'
+    suggestion: 'Annotate {name} with @Component'
+    params:
+      path_scope: src/main/java/com/acme/application/usecase/
+      annotations: 'Component'
+
+  # Declared SECOND in YAML; sorts FIRST alphabetically (A < B).
+  # Natural emission order is B, A — comparator must force output to A, B.
+  - id: A-pc01us013-required-service
+    kind: required_annotations
+    severity: ERROR
+    description: '{name}: {evidence}'
+    suggestion: 'Annotate {name} with @Service'
+    params:
+      path_scope: src/main/java/com/acme/application/usecase/
+      annotations: 'Service'
