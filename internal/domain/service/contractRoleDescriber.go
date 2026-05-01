@@ -18,8 +18,8 @@ import (
 //	aggregate-root  → "Aggregate root"
 //	service         → "Service implementing <Implements>; depends on <DependsOn[*]>"
 //	                  (degenerates gracefully when fields are empty)
-//	rest-adapter    → "REST adapter; calls <Uses[*]>"
-//	jpa-adapter     → "JPA adapter implementing <Implements>"
+//	rest-adapter        → "REST adapter; calls <Uses[*]>"
+//	persistence-adapter → "Persistence adapter implementing <Implements>"
 //	<unknown>       → "Contract of type <type>"  (no error — this is a
 //	                  presentational hint, not a domain invariant check)
 type ContractRoleDescriber struct{}
@@ -58,11 +58,11 @@ func (ContractRoleDescriber) Describe(c model.SpecContract) string {
 			return "REST adapter"
 		}
 		return "REST adapter; calls " + strings.Join(c.Uses, ", ")
-	case model.ContractJPAAdapter:
+	case model.ContractPersistenceAdapter:
 		if c.Implements == "" {
-			return "JPA adapter"
+			return "Persistence adapter"
 		}
-		return "JPA adapter implementing " + c.Implements
+		return "Persistence adapter implementing " + c.Implements
 	default:
 		return "Contract of type " + string(c.Type)
 	}

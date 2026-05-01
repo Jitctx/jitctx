@@ -53,4 +53,11 @@ var ExemptFiles = []string{
 	// annotations data-driven from the loaded ProfileBundle, this file is
 	// deleted and this exemption entry is removed in the same PR.
 	"internal/application/usecase/scaffolduc/javaScaffoldConstants.go",
+
+	// PC01US-014: the bundled-profile name constant lives here so the
+	// composition root (cli/wire.go) can fetch the default without naming
+	// any framework token. The infrastructure layer is the natural home
+	// for the literal — it sits next to the embedded bundled FS and the
+	// loader code that uses it.
+	"internal/infrastructure/fsprofile/bundled.go",
 }

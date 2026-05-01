@@ -1,0 +1,5 @@
+Lombok
+Spring
+Mockito
+Autowired
+JPA

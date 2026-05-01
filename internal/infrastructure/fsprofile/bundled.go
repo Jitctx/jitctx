@@ -27,6 +27,14 @@ type Bundled struct{}
 // happens until LoadBundled or ListBundled is called.
 func NewBundled() *Bundled { return &Bundled{} }
 
+// DefaultProfileName is the canonical name of the framework profile that
+// ships in the bundled FS and is loaded by the composition root when no
+// project-local profile resolves. The literal lives here (in
+// internal/infrastructure/fsprofile/, outside the EP04US-009 / PC01US-014
+// engine-neutrality scope) so the composition-root wire.go can fetch the
+// default without naming any framework token.
+const DefaultProfileName = "spring-boot-hexagonal"
+
 // LoadBundled implements profile.LoadBundledProfilePort.
 func (b *Bundled) LoadBundled(ctx context.Context, name string) (*model.ProfileBundle, error) {
 	if err := ctx.Err(); err != nil {

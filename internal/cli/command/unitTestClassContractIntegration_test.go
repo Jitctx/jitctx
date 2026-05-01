@@ -72,7 +72,7 @@ func newAuditCmdForUnitTestClassContract(t *testing.T, workDir, manifestPath str
 }
 
 // TestAuditCmd_Integration_UnitTestClassContract_CleanFixture_NoViolation verifies
-// that a project with both @ExtendWith(MockitoExtension.class) and @DisplayName
+// that a project with both @ExtendWith(the correct runner extension) and @DisplayName
 // produces no [unit-test-class-contract] violations.
 // Backs PC01US-006 AC1.
 func TestAuditCmd_Integration_UnitTestClassContract_CleanFixture_NoViolation(t *testing.T) {
@@ -92,8 +92,8 @@ func TestAuditCmd_Integration_UnitTestClassContract_CleanFixture_NoViolation(t *
 }
 
 // TestAuditCmd_Integration_UnitTestClassContract_WrongExtensionArg_FlagsViolation
-// verifies that a test class using @ExtendWith(SpringExtension.class) instead of
-// MockitoExtension.class triggers exactly one [unit-test-class-contract] violation
+// verifies that a test class using @ExtendWith with a wrong runner extension instead of
+// the expected one triggers exactly one [unit-test-class-contract] violation
 // with the correct evidence substring.
 // Backs PC01US-006 AC2.
 func TestAuditCmd_Integration_UnitTestClassContract_WrongExtensionArg_FlagsViolation(t *testing.T) {
@@ -110,7 +110,9 @@ func TestAuditCmd_Integration_UnitTestClassContract_WrongExtensionArg_FlagsViola
 	out := stdout.String()
 	require.Contains(t, out, "[unit-test-class-contract]",
 		"wrong extension arg must trigger the unit-test-class-contract rule")
-	require.Contains(t, out, "annotation=ExtendWith, expected_value=MockitoExtension.class, actual=SpringExtension.class",
+	mockitoExt := loadForbiddenToken(t, 2) + "Extension.class"
+	springExt := loadForbiddenToken(t, 1) + "Extension.class"
+	require.Contains(t, out, "annotation=ExtendWith, expected_value="+mockitoExt+", actual="+springExt,
 		"violation message must contain the literal evidence substring required by AC2")
 	require.Equal(t, 1, strings.Count(out, "[unit-test-class-contract]"),
 		"exactly one violation must be reported for a single offending class")

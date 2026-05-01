@@ -45,13 +45,14 @@ var recognizedFields = map[string]bool{
 
 // knownContractTypes maps spec type strings to model.ContractType constants.
 var knownContractTypes = map[string]model.ContractType{
-	"input-port":     model.ContractInputPort,
-	"output-port":    model.ContractOutputPort,
-	"entity":         model.ContractEntity,
-	"aggregate-root": model.ContractAggregate,
-	"service":        model.ContractService,
-	"rest-adapter":   model.ContractRestAdapter,
-	"jpa-adapter":    model.ContractJPAAdapter,
+	"input-port":          model.ContractInputPort,
+	"output-port":         model.ContractOutputPort,
+	"entity":              model.ContractEntity,
+	"aggregate-root":      model.ContractAggregate,
+	"service":             model.ContractService,
+	"rest-adapter":        model.ContractRestAdapter,
+	"persistence-adapter": model.ContractPersistenceAdapter,
+	"jpa-adapter":         model.ContractPersistenceAdapter, // backward-compat alias (PC01US-014)
 }
 
 // contractEntry tracks a contract being built and the line it was opened on.

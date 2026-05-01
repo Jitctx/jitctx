@@ -18,7 +18,7 @@ func NewMethodSignatureParser() MethodSignatureParser { return MethodSignaturePa
 // ParsedMethod is the projection consumed by serviceTest.tmpl /
 // restAdapterTest.tmpl. Only the Name field is currently consumed, but
 // ReturnType and Params are kept so the renderer (or a future US) can
-// build richer Mockito stubs (e.g., when arguments are present).
+// build richer test stubs (e.g., when arguments are present).
 //
 //	ReturnType: literal return-type token, e.g. "UserResponse", "void", "Optional<User>".
 //	Name:       Java method identifier, e.g. "execute", "findByEmail".

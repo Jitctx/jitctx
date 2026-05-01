@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"log/slog"
 
 	appaudituc "github.com/jitctx/jitctx/internal/application/usecase/audituc"
@@ -143,6 +144,13 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	profileResolver := fsprofile.NewResolver(profileBundleLoader, bundled, logger)
 	profileExtractor := fsprofile.NewExtractor()
 
+	// PC01US-014: load the test-runner extension FQN from the bundled profile so
+	// no application-layer source carries the framework-specific string literal.
+	var scaffoldTestRunnerExtFQN string
+	if sb, loadErr := bundled.LoadBundled(context.Background(), fsprofile.DefaultProfileName); loadErr == nil {
+		scaffoldTestRunnerExtFQN = sb.TestRunnerExtensionFQN
+	}
+
 	initProfileUC := appprofileinituc.New(
 		bundled,          // ListBundledProfilesPort (also satisfies LoadBundledProfilePort)
 		profileExtractor, // ExtractBundledProfilePort
@@ -182,7 +190,7 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 	idUtils := domspecsvc.NewJavaIdentifierUtils()
 	testMapper := domspecsvc.NewTestPathMapper()
 	methodParser := domspecsvc.NewMethodSignatureParser()
-	jpaAnnotator := domspecsvc.NewJPAFieldAnnotator()
+	idAnnotator := domspecsvc.NewIDFieldAnnotator()
 
 	auditRulesLoader := fsprofile.NewAuditRulesLoader(cfg.ProfilesDir, logger)
 	bundleAuditRulesLoader := fsprofile.NewBundleAuditRulesAdapter() // EP04US-004
@@ -223,11 +231,12 @@ func Wire(cfg config.Config, logger *slog.Logger) Deps {
 			endpointSynth,
 			idUtils,
 			methodParser,
-			jpaAnnotator,
+			idAnnotator,
 			scaffoldRegistry,
 			scaffoldTestRegistry,
 			scaffoldWriter,
 			logger,
+			scaffoldTestRunnerExtFQN,
 		),
 		Audit: appaudituc.New(
 			manifestStore,      // manifest.LoadManifestPort

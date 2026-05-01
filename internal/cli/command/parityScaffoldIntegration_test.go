@@ -79,7 +79,7 @@ func TestParity_Scaffold_MatchesEP03Baseline(t *testing.T) {
 	endpointSynth := service.NewEndpointSynthesizer()
 	idUtils := service.NewJavaIdentifierUtils()
 	methodParser := service.NewMethodSignatureParser()
-	jpaAnnotator := service.NewJPAFieldAnnotator()
+	idAnnotator := service.NewIDFieldAnnotator()
 	writer := fsscaffold.NewMultiFileWriter()
 
 	uc := appscaffolduc.New(
@@ -91,11 +91,12 @@ func TestParity_Scaffold_MatchesEP03Baseline(t *testing.T) {
 		endpointSynth,
 		idUtils,
 		methodParser,
-		jpaAnnotator,
+		idAnnotator,
 		prodAdapter,
 		testAdapter,
 		writer,
 		discardLogger(),
+		bundle.TestRunnerExtensionFQN,
 	)
 
 	// ── 3. Copy the spec fixture into a temp workDir ─────────────────────────
@@ -181,7 +182,7 @@ func sha256FileOrFail(t *testing.T, path string) [sha256.Size]byte {
 func hashHex(h [sha256.Size]byte) string {
 	const hextable = "0123456789abcdef"
 	buf := make([]byte, 16)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		buf[i*2] = hextable[h[i]>>4]
 		buf[i*2+1] = hextable[h[i]&0x0f]
 	}

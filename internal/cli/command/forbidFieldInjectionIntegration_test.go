@@ -20,10 +20,10 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/treesitter"
 )
 
-// newAuditCmdForForbidAutowiredFieldInjection builds a real cobra audit command
+// newAuditCmdForForbidFieldInjection builds a real cobra audit command
 // wired with real infrastructure adapters pointing at the given workDir.
 // This is a local copy per Q3 resolution (no upstream DRY refactor in this PR).
-func newAuditCmdForForbidAutowiredFieldInjection(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, *bytes.Buffer, func(args ...string) error) {
+func newAuditCmdForForbidFieldInjection(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, *bytes.Buffer, func(args ...string) error) {
 	t.Helper()
 
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
@@ -71,44 +71,44 @@ func newAuditCmdForForbidAutowiredFieldInjection(t *testing.T, workDir, manifest
 	}
 }
 
-// TestAuditCmd_Integration_ForbidAutowired_OnProductionFieldFlagsViolation verifies
-// that a field annotated with @Autowired in a production Java source file triggers
-// exactly one [no-field-injection] violation with correct file:line evidence.
+// TestAuditCmd_Integration_ForbidFieldInjection_OnProductionFieldFlagsViolation verifies
+// that a field annotated with the forbidden injection annotation in a production Java source
+// file triggers exactly one [no-field-injection] violation with correct file:line evidence.
 // Backs PC01US-004 Scenario 1 (AC: violation reported on the field's line).
-func TestAuditCmd_Integration_ForbidAutowired_OnProductionFieldFlagsViolation(t *testing.T) {
+func TestAuditCmd_Integration_ForbidFieldInjection_OnProductionFieldFlagsViolation(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
-	copyFixture(t, fixtureDir(t, "pc01us004ForbidAutowiredFieldInjection", "projectViolating"), workDir)
+	copyFixture(t, fixtureDir(t, "pc01us004ForbidFieldInjection", "projectViolating"), workDir)
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
-	stdout, _, run := newAuditCmdForForbidAutowiredFieldInjection(t, workDir, manifestPath)
+	stdout, _, run := newAuditCmdForForbidFieldInjection(t, workDir, manifestPath)
 
 	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
 
 	out := stdout.String()
 	require.Contains(t, out, "[no-field-injection]",
-		"production field with @Autowired must trigger the no-field-injection rule")
+		"production field with forbidden injection annotation must trigger the no-field-injection rule")
 	require.Contains(t, out, "Foo.java:7",
-		"violation must reference the field_declaration line (line 7 is the @Autowired annotation)")
-	require.Contains(t, out, "found=[Autowired]",
+		"violation must reference the field_declaration line (line 7 is the forbidden annotation)")
+	require.Contains(t, out, "found=["+loadForbiddenToken(t, 3)+"]",
 		"violation message must contain evidence of the forbidden annotation found")
 	require.Equal(t, 1, strings.Count(out, "[no-field-injection]"),
 		"exactly one violation must be reported for a single offending field")
 }
 
-// TestAuditCmd_Integration_ForbidAutowired_OnTestSupportFieldIsExempted verifies
-// that a field annotated with @Autowired whose file path matches the
+// TestAuditCmd_Integration_ForbidFieldInjection_OnTestSupportFieldIsExempted verifies
+// that a field annotated with the forbidden injection annotation whose file path matches the
 // **/testsupport/** exempt_paths glob does NOT trigger [no-field-injection].
 // Backs PC01US-004 Scenario 2 (AC: test-support files are exempt).
-func TestAuditCmd_Integration_ForbidAutowired_OnTestSupportFieldIsExempted(t *testing.T) {
+func TestAuditCmd_Integration_ForbidFieldInjection_OnTestSupportFieldIsExempted(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
-	copyFixture(t, fixtureDir(t, "pc01us004ForbidAutowiredFieldInjection", "projectExempt"), workDir)
+	copyFixture(t, fixtureDir(t, "pc01us004ForbidFieldInjection", "projectExempt"), workDir)
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
-	stdout, _, run := newAuditCmdForForbidAutowiredFieldInjection(t, workDir, manifestPath)
+	stdout, _, run := newAuditCmdForForbidFieldInjection(t, workDir, manifestPath)
 
 	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
 
@@ -117,45 +117,45 @@ func TestAuditCmd_Integration_ForbidAutowired_OnTestSupportFieldIsExempted(t *te
 		"file under **/testsupport/** must be exempt from the no-field-injection rule")
 }
 
-// TestAuditCmd_Integration_ForbidAutowired_OnConstructorParameterIsAllowed verifies
-// that a constructor parameter annotated with @Autowired does NOT trigger
+// TestAuditCmd_Integration_ForbidFieldInjection_OnConstructorParameterIsAllowed verifies
+// that a constructor parameter annotated with the injection annotation does NOT trigger
 // [no-field-injection] because the rule targets fields only (target=field).
-// Backs PC01US-004 Scenario 3 (AC: constructor-param @Autowired is allowed).
-func TestAuditCmd_Integration_ForbidAutowired_OnConstructorParameterIsAllowed(t *testing.T) {
+// Backs PC01US-004 Scenario 3 (AC: constructor-param injection annotation is allowed).
+func TestAuditCmd_Integration_ForbidFieldInjection_OnConstructorParameterIsAllowed(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
-	copyFixture(t, fixtureDir(t, "pc01us004ForbidAutowiredFieldInjection", "projectClean"), workDir)
+	copyFixture(t, fixtureDir(t, "pc01us004ForbidFieldInjection", "projectClean"), workDir)
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
-	stdout, _, run := newAuditCmdForForbidAutowiredFieldInjection(t, workDir, manifestPath)
+	stdout, _, run := newAuditCmdForForbidFieldInjection(t, workDir, manifestPath)
 
 	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
 
 	out := stdout.String()
 	require.NotContains(t, out, "[no-field-injection]",
-		"constructor-param @Autowired must not trigger the no-field-injection rule (target=field discrimination)")
+		"constructor-param injection annotation must not trigger the no-field-injection rule (target=field discrimination)")
 }
 
-// TestAuditCmd_Integration_ForbidAutowired_Determinism runs the audit against the
+// TestAuditCmd_Integration_ForbidFieldInjection_Determinism runs the audit against the
 // violating fixture in two separate temp dirs and asserts byte-identical output
 // after normalising the temp-dir path prefix.
 // Backs PC01RNF-003 (deterministic output).
-func TestAuditCmd_Integration_ForbidAutowired_Determinism(t *testing.T) {
+func TestAuditCmd_Integration_ForbidFieldInjection_Determinism(t *testing.T) {
 	t.Parallel()
 
 	// First run.
 	workDir1 := t.TempDir()
-	copyFixture(t, fixtureDir(t, "pc01us004ForbidAutowiredFieldInjection", "projectViolating"), workDir1)
+	copyFixture(t, fixtureDir(t, "pc01us004ForbidFieldInjection", "projectViolating"), workDir1)
 	manifestPath1 := filepath.Join(workDir1, "project-state.yaml")
-	stdout1, _, run1 := newAuditCmdForForbidAutowiredFieldInjection(t, workDir1, manifestPath1)
+	stdout1, _, run1 := newAuditCmdForForbidFieldInjection(t, workDir1, manifestPath1)
 	require.NoError(t, run1("--dir", workDir1, "--manifest", manifestPath1))
 
 	// Second run (separate temp dir — no shared state).
 	workDir2 := t.TempDir()
-	copyFixture(t, fixtureDir(t, "pc01us004ForbidAutowiredFieldInjection", "projectViolating"), workDir2)
+	copyFixture(t, fixtureDir(t, "pc01us004ForbidFieldInjection", "projectViolating"), workDir2)
 	manifestPath2 := filepath.Join(workDir2, "project-state.yaml")
-	stdout2, _, run2 := newAuditCmdForForbidAutowiredFieldInjection(t, workDir2, manifestPath2)
+	stdout2, _, run2 := newAuditCmdForForbidFieldInjection(t, workDir2, manifestPath2)
 	require.NoError(t, run2("--dir", workDir2, "--manifest", manifestPath2))
 
 	// Normalise temp-dir path prefix so the comparison is path-agnostic.

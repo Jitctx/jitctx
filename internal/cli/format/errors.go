@@ -16,7 +16,7 @@ func TranslateError(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, domerr.ErrNoProfileMatch):
-		return fmt.Errorf("no matching framework profile found; create a custom profile in .jitctx/profiles/ or add a pom.xml/build.gradle with a Spring Boot dependency")
+		return fmt.Errorf("no matching framework profile found; create a custom profile in .jitctx/profiles/ or add a pom.xml/build.gradle that matches a known framework profile")
 	case errors.Is(err, domerr.ErrManifestWrite):
 		return fmt.Errorf("failed to write project-state.yaml: %w; check filesystem permissions on the target directory", err)
 	case errors.Is(err, domerr.ErrParseFailure):

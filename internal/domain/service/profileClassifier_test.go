@@ -122,17 +122,17 @@ func TestClassifyDeclaration_SampleProfile(t *testing.T) {
 		wantMatched bool
 	}{
 		{
-			// EP01RF-012 §Business Rule — @Repository must classify as jpa-adapter.
+			// EP01RF-012 §Business Rule — @Repository must classify as persistence-adapter.
 			// No Gherkin scenario covers this today; this test makes the bundled rule
 			// load-bearing (removing it from the YAML would cause this test to fail).
-			name: "repository by annotation classifies as jpa-adapter",
+			name: "repository by annotation classifies as persistence-adapter",
 			decl: model.JavaDeclaration{
 				NodeType:    "class_declaration",
 				Name:        "UserRepositoryImpl",
 				Annotations: []string{"Repository"},
 			},
 			path:        "src/main/java/com/app/user/adapter/out/persistence/UserRepositoryImpl.java",
-			wantType:    model.ContractJPAAdapter,
+			wantType:    model.ContractPersistenceAdapter,
 			wantMatched: true,
 		},
 		{

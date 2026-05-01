@@ -40,6 +40,13 @@ func toDomain(d profileDTO) (*model.FrameworkProfile, error) {
 			return nil, fmt.Errorf("rule with empty classify_as: %w", domerr.ErrProfileInvalid)
 		}
 		ct := model.ContractType(r.ClassifyAs)
+		// PC01US-014 backward-compat: legacy profiles may declare the
+		// old "jpa-adapter" literal. Accept it transparently and rewrite
+		// to the new ContractPersistenceAdapter constant. Mirrors the
+		// alias already present in internal/infrastructure/mdspec/parser.go.
+		if ct == model.ContractType("jpa-adapter") {
+			ct = model.ContractPersistenceAdapter
+		}
 		if !isKnownContractType(ct) {
 			return nil, fmt.Errorf("unknown classify_as %q: %w", r.ClassifyAs, domerr.ErrProfileInvalid)
 		}
@@ -92,7 +99,7 @@ func isKnownContractType(ct model.ContractType) bool {
 	switch ct {
 	case model.ContractInputPort, model.ContractOutputPort, model.ContractEntity,
 		model.ContractAggregate, model.ContractService, model.ContractRestAdapter,
-		model.ContractJPAAdapter:
+		model.ContractPersistenceAdapter:
 		return true
 	}
 	return false

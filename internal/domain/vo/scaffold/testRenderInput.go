@@ -15,7 +15,7 @@ package scaffold
 //	ClassName      simple name of the class under test (e.g.,
 //	               "UserServiceImpl"). The test class is "<ClassName>Test".
 //	Imports        distinct, alphabetically sorted FQN imports. Always
-//	               contains JUnit + (when relevant) Mockito FQNs.
+//	               contains JUnit + (when relevant) mock-framework FQNs.
 //	Mocks          one entry per dependency the test must wire as @Mock
 //	               (service: DependsOn; rest-adapter: dedup(Uses+DependsOn)).
 //	               Empty for entity / aggregate-root.

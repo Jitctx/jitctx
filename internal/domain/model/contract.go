@@ -3,17 +3,20 @@ package model
 // ContractType is the canonical identifier enum used by SpecContract
 // (the spec-side authoring path). RF-015 explicitly preserves singular
 // Type semantics for specs. The seven existing constants stay as the
-// reference vocabulary for spec authoring.
+// reference vocabulary for spec authoring; PC01US-014 renames the
+// previous persistence-framework-specific constant + value to a language-neutral
+// identifier so the engine no longer references a specific persistence
+// framework.
 type ContractType string
 
 const (
-	ContractInputPort   ContractType = "input-port"
-	ContractOutputPort  ContractType = "output-port"
-	ContractEntity      ContractType = "entity"
-	ContractAggregate   ContractType = "aggregate-root"
-	ContractService     ContractType = "service"
-	ContractRestAdapter ContractType = "rest-adapter"
-	ContractJPAAdapter  ContractType = "jpa-adapter"
+	ContractInputPort          ContractType = "input-port"
+	ContractOutputPort         ContractType = "output-port"
+	ContractEntity             ContractType = "entity"
+	ContractAggregate          ContractType = "aggregate-root"
+	ContractService            ContractType = "service"
+	ContractRestAdapter        ContractType = "rest-adapter"
+	ContractPersistenceAdapter ContractType = "persistence-adapter" // PC01US-014: renamed from the previous persistence-framework-specific constant
 )
 
 // Contract is the manifest-side projection of a code element. EP04US-003

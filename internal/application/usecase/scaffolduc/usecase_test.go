@@ -188,8 +188,8 @@ func newUC(
 	endpointSynth := service.NewEndpointSynthesizer()
 	idUtils := service.NewJavaIdentifierUtils()
 	methodParser := service.NewMethodSignatureParser()
-	jpaAnnotator := service.NewJPAFieldAnnotator()
-	return scaffolduc.New(finder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, jpaAnnotator, renderer, testRenderer, writer, logger)
+	idAnnotator := service.NewIDFieldAnnotator()
+	return scaffolduc.New(finder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, idAnnotator, renderer, testRenderer, writer, logger, "")
 }
 
 // ─── Existing Tests ───────────────────────────────────────────────────────────
@@ -873,7 +873,7 @@ func TestScaffoldUseCase_MethodNameFreeze(t *testing.T) {
 
 // TestScaffoldUseCase_Entity_FieldsAnnotated asserts that the RenderInput.Fields
 // passed to the renderer for an entity contract contains typed EntityField values
-// with the expected JPA annotations.
+// with the expected persistence annotations.
 // Covers: "Long id" → @Id + @GeneratedValue; "String email" → no annotations.
 func TestScaffoldUseCase_Entity_FieldsAnnotated(t *testing.T) {
 	t.Parallel()
@@ -978,8 +978,8 @@ func TestScaffoldUseCase_TODOIncludesPerMethodName(t *testing.T) {
 				Methods: []string{"User foo(Long id)", "User bar(String name)"},
 			},
 			{
-				Name:       "UserJpaAdapter",
-				Type:       model.ContractJPAAdapter,
+				Name:       "UserPersistenceAdapter",
+				Type:       model.ContractPersistenceAdapter,
 				Implements: "UserRepository",
 			},
 		},
@@ -996,14 +996,14 @@ func TestScaffoldUseCase_TODOIncludesPerMethodName(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// UserJpaAdapter is captured at index 1 (second contract).
+	// UserPersistenceAdapter is captured at index 1 (second contract).
 	require.Len(t, renderer.captured, 2)
 	adapterInput := renderer.captured[1]
-	require.Equal(t, "UserJpaAdapter", adapterInput.ClassName)
+	require.Equal(t, "UserPersistenceAdapter", adapterInput.ClassName)
 	require.Len(t, adapterInput.Methods, 2)
 
-	require.Contains(t, adapterInput.Methods[0].Body, "// TODO(jitctx): implement UserJpaAdapter.foo")
-	require.Contains(t, adapterInput.Methods[1].Body, "// TODO(jitctx): implement UserJpaAdapter.bar")
+	require.Contains(t, adapterInput.Methods[0].Body, "// TODO(jitctx): implement UserPersistenceAdapter.foo")
+	require.Contains(t, adapterInput.Methods[1].Body, "// TODO(jitctx): implement UserPersistenceAdapter.bar")
 }
 
 // TestScaffoldUseCase_VoidMethodOmitsThrow verifies that a method with return
@@ -1022,8 +1022,8 @@ func TestScaffoldUseCase_VoidMethodOmitsThrow(t *testing.T) {
 				Methods: []string{"void deleteById(Long id)"},
 			},
 			{
-				Name:       "UserJpaAdapter",
-				Type:       model.ContractJPAAdapter,
+				Name:       "UserPersistenceAdapter",
+				Type:       model.ContractPersistenceAdapter,
 				Implements: "UserRepository",
 			},
 		},
@@ -1042,11 +1042,11 @@ func TestScaffoldUseCase_VoidMethodOmitsThrow(t *testing.T) {
 
 	require.Len(t, renderer.captured, 2)
 	adapterInput := renderer.captured[1]
-	require.Equal(t, "UserJpaAdapter", adapterInput.ClassName)
+	require.Equal(t, "UserPersistenceAdapter", adapterInput.ClassName)
 	require.Len(t, adapterInput.Methods, 1)
 	m := adapterInput.Methods[0]
 
-	require.Contains(t, m.Body, "// TODO(jitctx): implement UserJpaAdapter.deleteById")
+	require.Contains(t, m.Body, "// TODO(jitctx): implement UserPersistenceAdapter.deleteById")
 	require.NotContains(t, m.Body, "throw new UnsupportedOperationException")
 }
 

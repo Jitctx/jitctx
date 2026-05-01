@@ -203,8 +203,8 @@ func TestScanCmd_Integration_ProfileFlagSelectsByName(t *testing.T) {
 
 	// Write an additional custom profile as a DIRECTORY alongside the one from the fixture.
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
-	mySpringDir := filepath.Join(profilesDir, "my-spring")
-	require.NoError(t, os.MkdirAll(mySpringDir, 0o755))
+	myCustomDir := filepath.Join(profilesDir, "my-spring")
+	require.NoError(t, os.MkdirAll(myCustomDir, 0o755))
 
 	customProfile := `name: my-spring
 languages: [java]
@@ -227,7 +227,7 @@ rules:
       has_annotation: Entity
     classify_as: entity
 `
-	require.NoError(t, os.WriteFile(filepath.Join(mySpringDir, "profile.yaml"), []byte(customProfile), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(myCustomDir, "profile.yaml"), []byte(customProfile), 0o644))
 
 	factory := buildScanFactoryWithLogger(".jitctx/profiles", discardLogger())
 	var stdout bytes.Buffer
@@ -346,8 +346,8 @@ func TestScanCmd_Integration_MultipleCustomProfilesFirstWins(t *testing.T) {
 	// Write an additional directory-based profile that also contains a valid
 	// profile.yaml. "my-spring" > "spring-boot-hexagonal" alphabetically — the
 	// Resolver returns the first alphabetical match (spring-boot-hexagonal).
-	mySpringDir := filepath.Join(profilesDir, "my-spring")
-	require.NoError(t, os.MkdirAll(mySpringDir, 0o755))
+	myCustomDir := filepath.Join(profilesDir, "my-spring")
+	require.NoError(t, os.MkdirAll(myCustomDir, 0o755))
 	customProfile := `name: my-spring
 languages: [java]
 query_lang: java
@@ -369,7 +369,7 @@ rules:
       has_annotation: Entity
     classify_as: entity
 `
-	require.NoError(t, os.WriteFile(filepath.Join(mySpringDir, "profile.yaml"), []byte(customProfile), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(myCustomDir, "profile.yaml"), []byte(customProfile), 0o644))
 
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))

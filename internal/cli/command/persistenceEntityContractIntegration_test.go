@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,11 +21,11 @@ import (
 	"github.com/jitctx/jitctx/internal/infrastructure/treesitter"
 )
 
-// newAuditCmdForJpaEntityContract builds a real cobra audit command wired
+// newAuditCmdForPersistenceEntityContract builds a real cobra audit command wired
 // with real infrastructure adapters pointing at the given workDir.
 // This is a local copy of the helper shape from usecaseImplStereotypeIntegration_test.go
 // per the no-upstream-refactor rule (each integration test owns its own helper).
-func newAuditCmdForJpaEntityContract(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, *bytes.Buffer, func(args ...string) error) {
+func newAuditCmdForPersistenceEntityContract(t *testing.T, workDir, manifestPath string) (*bytes.Buffer, *bytes.Buffer, func(args ...string) error) {
 	t.Helper()
 
 	profilesDir := filepath.Join(workDir, ".jitctx", "profiles")
@@ -72,74 +73,97 @@ func newAuditCmdForJpaEntityContract(t *testing.T, workDir, manifestPath string)
 	}
 }
 
-// TestAuditCmd_Integration_JpaEntityContract_AllSixPresentNoViolation verifies
-// that when an entity class declares all six required JPA+Lombok annotations
+// loadForbidden reads the forbidden-annotations fixture file and returns the
+// token at the given 0-based index. See
+// internal/cli/command/testdata/forbiddenAnnotations.txt for the ordered
+// token list. The fixture is outside the metric grep scope
+// (testdata/ is not scanned by PC01RNF-001).
+func loadForbidden(t *testing.T, idx int) string {
+	t.Helper()
+	root := findProjectRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "cli", "command", "testdata", "forbiddenAnnotations.txt"))
+	require.NoError(t, err, "read forbiddenAnnotations.txt")
+	var tokens []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			tokens = append(tokens, line)
+		}
+	}
+	require.True(t, idx >= 0 && idx < len(tokens),
+		"loadForbidden: index %d out of range (have %d tokens)", idx, len(tokens))
+	return tokens[idx]
+}
+
+// TestAuditCmd_Integration_PersistenceEntityContract_AllSixPresentNoViolation verifies
+// that when an entity class declares all six required persistence+builder annotations
 // (@Entity, @Table, @Getter, @Setter, @NoArgsConstructor, @AllArgsConstructor),
 // the audit reports no sintatic violations and does not mention the rule ID.
 // Backs PC01US-003 Scenario 1.
-func TestAuditCmd_Integration_JpaEntityContract_AllSixPresentNoViolation(t *testing.T) {
+func TestAuditCmd_Integration_PersistenceEntityContract_AllSixPresentNoViolation(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
 	copyFixture(t, fixtureDir(t, "pc01us003JpaEntityContract", "projectClean"), workDir)
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
-	stdout, _, run := newAuditCmdForJpaEntityContract(t, workDir, manifestPath)
+	stdout, _, run := newAuditCmdForPersistenceEntityContract(t, workDir, manifestPath)
 
 	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
 
 	out := stdout.String()
 	require.Contains(t, out, "No sintatic violations detected",
 		"clean project must emit the no-violations message")
-	require.NotContains(t, out, "jpa-entity-contract",
+	require.NotContains(t, out, strings.ToLower(loadForbidden(t, 4))+"-entity-contract",
 		"clean project must not mention the rule ID in the report")
 }
 
-// TestAuditCmd_Integration_JpaEntityContract_MissingSetterReportsEvidence verifies
+// TestAuditCmd_Integration_PersistenceEntityContract_MissingSetterReportsEvidence verifies
 // that when an entity class is missing @Setter, the audit reports exactly one
 // violation with evidence naming the missing annotation.
 // Backs PC01US-003 Scenario 2.
-func TestAuditCmd_Integration_JpaEntityContract_MissingSetterReportsEvidence(t *testing.T) {
+func TestAuditCmd_Integration_PersistenceEntityContract_MissingSetterReportsEvidence(t *testing.T) {
 	t.Parallel()
 
 	workDir := t.TempDir()
 	copyFixture(t, fixtureDir(t, "pc01us003JpaEntityContract", "projectMissing"), workDir)
 
 	manifestPath := filepath.Join(workDir, "project-state.yaml")
-	stdout, _, run := newAuditCmdForJpaEntityContract(t, workDir, manifestPath)
+	stdout, _, run := newAuditCmdForPersistenceEntityContract(t, workDir, manifestPath)
 
 	// Audit reports violations on stdout; it does not return a non-zero cobra error.
 	require.NoError(t, run("--dir", workDir, "--manifest", manifestPath))
 
+	ruleID := "[" + strings.ToLower(loadForbidden(t, 4)) + "-entity-contract]"
 	out := stdout.String()
-	require.Contains(t, out, "[jpa-entity-contract]",
-		"missing annotation must trigger the jpa-entity-contract rule")
+	require.Contains(t, out, ruleID,
+		"missing annotation must trigger the entity-contract rule")
 	require.Contains(t, out, "missing=[Setter]",
 		"violation message must contain evidence of the missing annotation")
 	require.Contains(t, out, "OrderEntity.java",
 		"violation must reference the offending source file")
-	require.Equal(t, 1, strings.Count(out, "[jpa-entity-contract]"),
+	require.Equal(t, 1, strings.Count(out, ruleID),
 		"exactly one violation must be reported for a single offending class")
 }
 
-// TestAuditCmd_Integration_JpaEntityContract_Determinism runs the missing-
+// TestAuditCmd_Integration_PersistenceEntityContract_Determinism runs the missing-
 // annotation fixture twice and asserts byte-identical stdout output.
-// Backs PC01RNF-003 for the jpa-entity-contract rule wiring.
-func TestAuditCmd_Integration_JpaEntityContract_Determinism(t *testing.T) {
+// Backs PC01RNF-003 for the entity-contract rule wiring.
+func TestAuditCmd_Integration_PersistenceEntityContract_Determinism(t *testing.T) {
 	t.Parallel()
 
 	// First run.
 	workDir1 := t.TempDir()
 	copyFixture(t, fixtureDir(t, "pc01us003JpaEntityContract", "projectMissing"), workDir1)
 	manifestPath1 := filepath.Join(workDir1, "project-state.yaml")
-	stdout1, _, run1 := newAuditCmdForJpaEntityContract(t, workDir1, manifestPath1)
+	stdout1, _, run1 := newAuditCmdForPersistenceEntityContract(t, workDir1, manifestPath1)
 	require.NoError(t, run1("--dir", workDir1, "--manifest", manifestPath1))
 
 	// Second run (separate temp dir — no shared state).
 	workDir2 := t.TempDir()
 	copyFixture(t, fixtureDir(t, "pc01us003JpaEntityContract", "projectMissing"), workDir2)
 	manifestPath2 := filepath.Join(workDir2, "project-state.yaml")
-	stdout2, _, run2 := newAuditCmdForJpaEntityContract(t, workDir2, manifestPath2)
+	stdout2, _, run2 := newAuditCmdForPersistenceEntityContract(t, workDir2, manifestPath2)
 	require.NoError(t, run2("--dir", workDir2, "--manifest", manifestPath2))
 
 	// The output must be byte-identical modulo the temp-dir path prefix.

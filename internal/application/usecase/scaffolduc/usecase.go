@@ -24,19 +24,20 @@ var _ domscaffolduc.UseCase = (*Impl)(nil)
 // spec resolution → parse → Package validation → per-contract view-model
 // build → template render → atomic batch write.
 type Impl struct {
-	finder         spec.FindSpecFilePort
-	parser         spec.ParseSpecPort
-	mapper         service.ContractPathMapper
-	testMapper     service.TestPathMapper
-	importResolver service.JavaImportResolver
-	endpointSynth  service.EndpointSynthesizer
-	idUtils        service.JavaIdentifierUtils
-	methodParser   service.MethodSignatureParser
-	jpaAnnotator   service.JPAFieldAnnotator
-	renderer       spec.RenderProductionTemplatePort
-	testRenderer   spec.RenderTestTemplatePort
-	writer         spec.WriteProductionFilesPort
-	logger         *slog.Logger
+	finder           spec.FindSpecFilePort
+	parser           spec.ParseSpecPort
+	mapper           service.ContractPathMapper
+	testMapper       service.TestPathMapper
+	importResolver   service.JavaImportResolver
+	endpointSynth    service.EndpointSynthesizer
+	idUtils          service.JavaIdentifierUtils
+	methodParser     service.MethodSignatureParser
+	idAnnotator      service.IDFieldAnnotator
+	renderer         spec.RenderProductionTemplatePort
+	testRenderer     spec.RenderTestTemplatePort
+	writer           spec.WriteProductionFilesPort
+	logger           *slog.Logger
+	testRunnerExtFQN string // PC01US-014: from ProfileBundle.TestRunnerExtensionFQN; empty → omit @ExtendWith
 }
 
 // New constructs a scaffolduc.Impl. All parameters are required.
@@ -49,26 +50,28 @@ func New(
 	endpointSynth service.EndpointSynthesizer,
 	idUtils service.JavaIdentifierUtils,
 	methodParser service.MethodSignatureParser,
-	jpaAnnotator service.JPAFieldAnnotator,
+	idAnnotator service.IDFieldAnnotator,
 	renderer spec.RenderProductionTemplatePort,
 	testRenderer spec.RenderTestTemplatePort,
 	writer spec.WriteProductionFilesPort,
 	logger *slog.Logger,
+	testRunnerExtFQN string,
 ) *Impl {
 	return &Impl{
-		finder:         finder,
-		parser:         parser,
-		mapper:         mapper,
-		testMapper:     testMapper,
-		importResolver: importResolver,
-		endpointSynth:  endpointSynth,
-		idUtils:        idUtils,
-		methodParser:   methodParser,
-		jpaAnnotator:   jpaAnnotator,
-		renderer:       renderer,
-		testRenderer:   testRenderer,
-		writer:         writer,
-		logger:         logger,
+		finder:           finder,
+		parser:           parser,
+		mapper:           mapper,
+		testMapper:       testMapper,
+		importResolver:   importResolver,
+		endpointSynth:    endpointSynth,
+		idUtils:          idUtils,
+		methodParser:     methodParser,
+		idAnnotator:      idAnnotator,
+		renderer:         renderer,
+		testRenderer:     testRenderer,
+		writer:           writer,
+		logger:           logger,
+		testRunnerExtFQN: testRunnerExtFQN,
 	}
 }
 
@@ -188,7 +191,7 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 			frameworkAnnotation = annotationRestController
 		case model.ContractEntity, model.ContractAggregate:
 			frameworkAnnotation = annotationEntity
-		case model.ContractJPAAdapter:
+		case model.ContractPersistenceAdapter:
 			frameworkAnnotation = annotationRepository
 		}
 
@@ -216,7 +219,7 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 					Body:      "",
 				})
 			}
-		case model.ContractService, model.ContractJPAAdapter:
+		case model.ContractService, model.ContractPersistenceAdapter:
 			implTarget, found := contractIndex[c.Implements]
 			if found && c.Implements != "" {
 				for _, m := range implTarget.Methods {
@@ -267,17 +270,17 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 					// restAdapter.tmpl renders endpoints with `public Object <method>()`,
 					// never void, so the returnType is hard-coded to "Object" here so the
 					// throw line is always emitted. Keeping the same helper gives format
-					// consistency with service / jpa-adapter (US-001 acceptance scenario
+					// consistency with service / persistence-adapter (US-001 acceptance scenario
 					// "TODO format is consistent across types").
 					Body: buildMethodBody(c.Name, eb.MethodName, "Object"),
 				})
 			}
 		}
 
-		// Dependencies: service / rest-adapter / jpa-adapter.
+		// Dependencies: service / rest-adapter / persistence-adapter.
 		var deps []scaffoldvo.ConstructorDep
 		switch c.Type {
-		case model.ContractService, model.ContractJPAAdapter:
+		case model.ContractService, model.ContractPersistenceAdapter:
 			for _, n := range c.DependsOn {
 				deps = append(deps, scaffoldvo.ConstructorDep{
 					Type:      n,
@@ -302,7 +305,7 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 			Imports:          imports,
 			ClassAnnotations: classAnnotations,
 			Implements:       implementsName,
-			Fields:           u.jpaAnnotator.Annotate(c.Fields),
+			Fields:           u.idAnnotator.Annotate(c.Fields),
 			Methods:          methods,
 			Endpoints:        endpoints,
 			Dependencies:     deps,
@@ -332,7 +335,7 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 			return scaffoldvo.ScaffoldOutput{}, err
 		}
 		if relPath == "" {
-			// Intentionally non-testable (input-port, output-port, jpa-adapter).
+			// Intentionally non-testable (input-port, output-port, persistence-adapter).
 			u.logger.Debug("skipping non-testable contract", slog.String("name", c.Name), slog.String("type", string(c.Type)))
 			continue
 		}
@@ -428,7 +431,7 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 		}
 
 		// 6b.6: Build Imports.
-		testImports := buildTestImports(c.Type, mocks, contractIndex, productionRelPaths, parsed.Package, u.idUtils)
+		testImports := buildTestImports(c.Type, mocks, contractIndex, productionRelPaths, parsed.Package, u.idUtils, u.testRunnerExtFQN)
 
 		// 6b.7: Assemble TestRenderInput.
 		tvm := scaffoldvo.TestRenderInput{
@@ -481,9 +484,11 @@ func (u *Impl) Execute(ctx context.Context, in scaffoldvo.ScaffoldInput) (scaffo
 // buildTestImports constructs the sorted import list for a test class.
 //
 //   - Always includes org.junit.jupiter.api.Test.
-//   - For service / rest-adapter: adds the four Mockito FQNs plus the FQN
+//   - For service / rest-adapter: adds the test-framework FQNs plus the FQN
 //     of each mock type (if resolvable from the contract index).
 //   - SUT FQN is OMITTED because the test shares the production package.
+//   - testRunnerExtFQN is sourced from ProfileBundle.TestRunnerExtensionFQN;
+//     empty string means @ExtendWith is omitted.
 func buildTestImports(
 	contractType model.ContractType,
 	mocks []scaffoldvo.TestMockField,
@@ -491,6 +496,7 @@ func buildTestImports(
 	productionRelPaths map[string]string,
 	modulePackage string,
 	idUtils service.JavaIdentifierUtils,
+	testRunnerExtFQN string,
 ) []string {
 	importSet := make(map[string]struct{})
 	importSet["org.junit.jupiter.api.Test"] = struct{}{}
@@ -500,7 +506,9 @@ func buildTestImports(
 		importSet["org.junit.jupiter.api.extension.ExtendWith"] = struct{}{}
 		importSet["org.mockito.InjectMocks"] = struct{}{}
 		importSet["org.mockito.Mock"] = struct{}{}
-		importSet[importTestRunnerExtensionFQN] = struct{}{}
+		if testRunnerExtFQN != "" {
+			importSet[testRunnerExtFQN] = struct{}{}
+		}
 
 		// For each mock, attempt FQN resolution via the contract index.
 		for _, m := range mocks {
@@ -539,7 +547,7 @@ func dedupStrings(in []string) []string {
 
 // buildMethodBody returns the body string for a class-method stub. The
 // returned string is dropped verbatim into the {{.Body}} action of the
-// service / jpa-adapter / rest-adapter template, which precedes it with
+// service / persistence-adapter / rest-adapter template, which precedes it with
 // 8 spaces of indentation. When the body is multi-line, every line AFTER
 // the first must be prefixed with 8 spaces (the template only indents the
 // first line) so that the rendered Java source has each statement at the

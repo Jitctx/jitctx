@@ -81,13 +81,13 @@ var _ specport.RenderProductionTemplatePort = (*TemplateRegistry)(nil)
 // templateNameByType maps the SpecContract.Type (string) to the template
 // basename (without .tmpl).
 var templateNameByType = map[string]string{
-	"input-port":     "inputPort",
-	"output-port":    "outputPort",
-	"entity":         "entity",
-	"aggregate-root": "aggregateRoot",
-	"service":        "service",
-	"rest-adapter":   "restAdapter",
-	"jpa-adapter":    "jpaAdapter",
+	"input-port":          "inputPort",
+	"output-port":         "outputPort",
+	"entity":              "entity",
+	"aggregate-root":      "aggregateRoot",
+	"service":             "service",
+	"rest-adapter":        "restAdapter",
+	"persistence-adapter": "jpaAdapter",
 }
 
 // Render selects the template for in.ContractType, executes it against in,

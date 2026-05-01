@@ -177,10 +177,11 @@ func toBundleDomain(dto bundleDTO, templates map[string][]byte, logger *slog.Log
 	}
 
 	return &model.ProfileBundle{
-		Profile:       profile,
-		Templates:     templates,
-		RawTypes:      rawTypes,
-		RawPackaging:  rawPackaging,
-		RawAuditRules: rawAuditRules,
+		Profile:                profile,
+		Templates:              templates,
+		RawTypes:               rawTypes,
+		RawPackaging:           rawPackaging,
+		RawAuditRules:          rawAuditRules,
+		TestRunnerExtensionFQN: dto.TestRunnerExtensionFQN,
 	}, nil
 }

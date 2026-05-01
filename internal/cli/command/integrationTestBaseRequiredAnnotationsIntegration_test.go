@@ -74,7 +74,7 @@ func newAuditCmdForIntegrationTestBaseRequiredAnnotations(t *testing.T, workDir,
 
 // TestAuditCmd_Integration_IntegrationTestBaseRequiredAnnotations_AllThreePresentNoViolation
 // verifies that a BaseIntegrationTest class declaring all three required
-// annotations (@SpringBootTest, @Testcontainers, @ActiveProfiles("test"))
+// annotations (@BootTest, @Testcontainers, @ActiveProfiles("test"))
 // produces zero [integration-test-base] violations. Backs PC01US-009 AC1.
 func TestAuditCmd_Integration_IntegrationTestBaseRequiredAnnotations_AllThreePresentNoViolation(t *testing.T) {
 	t.Parallel()

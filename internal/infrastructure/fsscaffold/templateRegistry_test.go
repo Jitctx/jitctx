@@ -208,12 +208,12 @@ func TestTemplateRegistry_Render(t *testing.T) {
 		require.Contains(t, got, `throw new UnsupportedOperationException(`)
 	})
 
-	t.Run("JpaAdapter", func(t *testing.T) {
+	t.Run("PersistenceAdapter", func(t *testing.T) {
 		t.Parallel()
 
 		reg := fsscaffold.NewRegistry()
 		in := scaffoldvo.RenderInput{
-			ContractType:     "jpa-adapter",
+			ContractType:     "persistence-adapter",
 			Package:          "com.app.user.adapter.out.persistence",
 			ClassName:        "UserJpaAdapter",
 			Imports:          []string{"org.springframework.stereotype.Repository"},

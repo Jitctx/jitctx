@@ -60,8 +60,8 @@ func TestContractPathMapper_Map(t *testing.T) {
 			wantPath:  "domain/Order.java",
 		},
 		{
-			name:      "jpa_adapter",
-			ctype:     model.ContractJPAAdapter,
+			name:      "persistence_adapter",
+			ctype:     model.ContractPersistenceAdapter,
 			inputName: "X",
 			wantPath:  "adapter/out/persistence/X.java",
 		},
@@ -90,8 +90,8 @@ func TestContractPathMapper_Map(t *testing.T) {
 					"aggregate-root",
 					"entity",
 					"input-port",
-					"jpa-adapter",
 					"output-port",
+					"persistence-adapter",
 					"rest-adapter",
 					"service",
 				}, uct.SupportedSorted)

@@ -43,8 +43,8 @@ type JavaFileSummary struct {
 // slice when the declaration is not a class or has no fields.
 type JavaField struct {
 	Name        string   // field identifier, e.g. "repository"
-	Type        string   // raw type token as it appears in source, e.g. "UserRepositoryJpa" or "List<User>"
-	Annotations []string // simple names, no leading @ (e.g. ["Autowired"]). Empty when not extracted.
+	Type        string   // raw type token as it appears in source, e.g. "UserRecord" or "List<User>"
+	Annotations []string // simple names, no leading @ (e.g. ["Marker"]). Empty when not extracted.
 	Line        int      // 1-based line of the field_declaration node. 0 if unknown.
 }
 

@@ -2,7 +2,7 @@ package scaffold
 
 // EntityField is the typed projection of one declared field on an entity
 // or aggregate-root contract. The use case computes EntityField slices via
-// service.JPAFieldAnnotator and hands them to the renderer; the template
+// service.IDFieldAnnotator and hands them to the renderer; the template
 // stays "dumb" and just iterates.
 //
 // Field semantics:

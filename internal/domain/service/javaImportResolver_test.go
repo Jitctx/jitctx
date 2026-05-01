@@ -222,7 +222,7 @@ func TestJavaImportResolver_Resolve(t *testing.T) {
 		require.Contains(t, imports, "jakarta.persistence.GenerationType")
 	})
 
-	t.Run("JpaAdapter", func(t *testing.T) {
+	t.Run("PersistenceAdapter", func(t *testing.T) {
 		t.Parallel()
 
 		spec := model.FeatureSpec{
@@ -232,7 +232,7 @@ func TestJavaImportResolver_Resolve(t *testing.T) {
 			Contracts: []model.SpecContract{
 				{
 					Name:       "UserRepositoryJpa",
-					Type:       model.ContractJPAAdapter,
+					Type:       model.ContractPersistenceAdapter,
 					Implements: "UserRepository",
 				},
 				{

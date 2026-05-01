@@ -278,7 +278,7 @@ func evalFieldTypeLayerViolation(
 //	                   preserved and used to derive deterministic
 //	                   "missing=[...]" evidence.
 //	"expected_values": OPTIONAL comma-joined list of "Annotation=Value" pairs
-//	                   (e.g. "ExtendWith=MockitoExtension.class"). For each
+//	                   (e.g. "ExtendWith=Foo.class"). For each
 //	                   pair, when the annotation IS present on a matching
 //	                   declaration, the evaluator compares the text of its
 //	                   first positional argument (decl.AnnotationArgs[ann])
@@ -342,8 +342,8 @@ func evalFieldTypeLayerViolation(
 //     non_empty_value_annotations empty-value violations.
 //
 // PC01RF-001 (all-of presence), PC01RF-007 (argument matching),
-// PC01RNF-001 (engine language-neutrality — no Java/Spring identifiers
-// referenced here), PC01RF-009 (evidence-rich messages), PC01US-010.
+// PC01RNF-001 (engine language-neutrality), PC01RF-009 (evidence-rich
+// messages), PC01US-010.
 func evalRequiredAnnotations(
 	moduleID string, summary model.JavaFileSummary, rule model.AuditRule,
 ) []auditvo.AuditViolation {
@@ -537,7 +537,7 @@ func matchGlob(pattern, candidate string) bool {
 //	"path_scope":   substring restricting which files this rule applies to
 //	               (e.g. "/src/main/java/"). REQUIRED.
 //	"annotations":  comma-joined list of forbidden annotation simple names
-//	               (without the leading "@"), e.g. "Autowired". The rule
+//	               (without the leading "@"), e.g. "Marker". The rule
 //	               fires when ANY listed annotation is present on a
 //	               matching target. REQUIRED, non-empty.
 //	"target":       one of "class" | "field". Default "class".
@@ -1088,7 +1088,7 @@ func splitTopLevel(s string) []string {
 //	{kind}               — candidate Kind; "" when actual=="none"
 //
 // PC01RF-006, PC01RF-009 (evidence-rich messages), PC01RNF-001 (no
-// Java/Spring/Lombok identifiers in this function), PC01RNF-003 (deterministic).
+// PC01RNF-001 (engine language-neutrality), PC01RNF-003 (deterministic).
 func evalRequiredParameterizedSupertype(
 	moduleID string, summary model.JavaFileSummary, rule model.AuditRule,
 ) []auditvo.AuditViolation {

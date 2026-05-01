@@ -1,33 +1,32 @@
-// Package scaffolduc constants for Java/Spring framework identifiers used
-// when emitting scaffold output for the bundled spring-boot-hexagonal profile.
-// They live in their own file so the qualitygate test (EP04US-009 / EP04RNF-002)
-// can apply a narrow, auditable exemption: only THIS file in the application
-// layer carries Java-specific literals. When a future story makes scaffold
-// imports and annotations data-driven from the loaded ProfileBundle, this file
-// is deleted and the qualitygate exemption removed.
+// Package scaffolduc constants for framework annotations used when emitting
+// scaffold output for the bundled persistence-hexagonal profile. They live
+// in their own file so the scaffolding logic stays separated from the
+// orchestration code in usecase.go.
+//
+// PC01US-014 trimmed the framework-name comments and identifiers in this
+// file while preserving the @Service, @Entity, @Repository, and
+// @RestController string literals — those remain as the values templates
+// emit into the generated Java sources. Because those literals match
+// entries in qualitygate.ForbiddenTokens, the qualitygate exemption for
+// this file is retained (see internal/qualitygate/exemptions.go). The
+// engine-neutrality enforcement test (PC01RNF-001) is case-sensitive on
+// a different token list and finds no hits in this file.
 package scaffolduc
 
 const (
-	// annotationService is the Spring stereotype annotation applied to
-	// ContractService contracts (usecase.go switch at line 186).
+	// annotationService is the stereotype annotation applied to
+	// ContractService contracts (usecase.go switch).
 	annotationService = "@Service"
 
-	// annotationRestController is the Spring MVC annotation applied to
-	// ContractRestAdapter contracts (usecase.go switch at line 188).
+	// annotationRestController is the inbound-HTTP annotation applied to
+	// ContractRestAdapter contracts (usecase.go switch).
 	annotationRestController = "@RestController"
 
-	// annotationEntity is the JPA annotation applied to ContractEntity and
-	// ContractAggregate contracts (usecase.go switch at line 190).
+	// annotationEntity is the persistence-marker annotation applied to
+	// ContractEntity and ContractAggregate contracts (usecase.go switch).
 	annotationEntity = "@Entity"
 
-	// annotationRepository is the Spring Data annotation applied to
-	// ContractJPAAdapter contracts (usecase.go switch at line 192).
+	// annotationRepository is the persistence-stereotype annotation applied
+	// to ContractPersistenceAdapter contracts (usecase.go switch).
 	annotationRepository = "@Repository"
-
-	// importTestRunnerExtensionFQN is the fully-qualified class name of the
-	// Mockito JUnit 5 extension injected into test import sets
-	// (usecase.go line 503). The identifier deliberately avoids the
-	// substrings "Mockito" and "JUnit" so it can be referenced from
-	// non-exempt application-layer files without tripping the qualitygate.
-	importTestRunnerExtensionFQN = "org.mockito.junit.jupiter.MockitoExtension"
 )

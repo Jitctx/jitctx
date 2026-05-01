@@ -1,6 +1,9 @@
 package service_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,6 +17,24 @@ const testModuleID = "mod-user-management"
 
 // newEvaluator returns a fresh AuditEvaluator for each test.
 func newEvaluator() *service.AuditEvaluator { return service.NewAuditEvaluator() }
+
+// loadForbidden reads testdata/forbiddenAnnotations.txt and returns the
+// non-empty trimmed lines. Index positions are stable:
+//
+//	0 = code-gen-lib  1 = di-framework  2 = test-runner  3 = field-injection marker  4 = persistence-framework
+func loadForbidden(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "forbiddenAnnotations.txt"))
+	require.NoError(t, err, "loadForbidden: read testdata/forbiddenAnnotations.txt")
+	var out []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			out = append(out, s)
+		}
+	}
+	require.Len(t, out, 5, "loadForbidden: expected 5 entries in forbidden list")
+	return out
+}
 
 // ---------------------------------------------------------------------------
 // annotation_path_mismatch
@@ -262,16 +283,22 @@ func TestAuditEvaluator_InterfaceNaming(t *testing.T) {
 
 func TestAuditEvaluator_ForbiddenImport(t *testing.T) {
 	t.Parallel()
+	forbidden := loadForbidden(t)
+	// forbidden[1] = framework-DI token; forbidden[3] = field-injection-marker token
+	frameworkPkg := "org." + strings.ToLower(forbidden[1]) + "."
+	fieldInjectionImport := frameworkPkg + "beans.factory.annotation." + forbidden[3]
+	frameworkServiceImport := frameworkPkg + "stereotype.Service"
+	frameworkControllerImport := frameworkPkg + "web.bind.annotation.RestController"
 
 	rule := model.AuditRule{
 		ID:          "AR-004",
 		Kind:        model.AuditKindForbiddenImport,
 		Severity:    model.AuditSeverityError,
-		Description: "Domain file must not import org.springframework.*",
+		Description: "Domain file must not import framework packages",
 		Suggestion:  "Remove forbidden import {import} from {file}",
 		Params: map[string]string{
 			"path_scope":    "/domain/",
-			"import_prefix": "org.springframework.",
+			"import_prefix": frameworkPkg,
 		},
 	}
 
@@ -282,15 +309,15 @@ func TestAuditEvaluator_ForbiddenImport(t *testing.T) {
 		wantViolations int
 	}{
 		{
-			name:           "violation-when-domain-file-imports-springframework",
+			name:           "violation-when-domain-file-imports-framework",
 			filePath:       "src/main/java/com/app/domain/UserService.java",
-			imports:        []string{"org.springframework.stereotype.Service", "java.util.List"},
+			imports:        []string{frameworkServiceImport, "java.util.List"},
 			wantViolations: 1,
 		},
 		{
 			name:           "no-violation-when-path-scope-does-not-match",
 			filePath:       "src/main/java/com/app/adapter/in/web/UserController.java",
-			imports:        []string{"org.springframework.web.bind.annotation.RestController"},
+			imports:        []string{frameworkControllerImport},
 			wantViolations: 0,
 		},
 		{
@@ -302,7 +329,7 @@ func TestAuditEvaluator_ForbiddenImport(t *testing.T) {
 		{
 			name:           "multiple-violations-for-multiple-forbidden-imports",
 			filePath:       "src/main/java/com/app/domain/UserService.java",
-			imports:        []string{"org.springframework.stereotype.Service", "org.springframework.beans.factory.annotation.Autowired"},
+			imports:        []string{frameworkServiceImport, fieldInjectionImport},
 			wantViolations: 2,
 		},
 	}
@@ -341,7 +368,7 @@ func TestAuditEvaluator_FieldTypeLayerViolation(t *testing.T) {
 		ID:          "AR-005",
 		Kind:        model.AuditKindFieldTypeLayerViolation,
 		Severity:    model.AuditSeverityError,
-		Description: "Service class must not inject JPA adapters directly",
+		Description: "Service class must not inject persistence adapters directly",
 		Suggestion:  "Replace field {field_name} of type {field_type} with a port interface",
 		Params: map[string]string{
 			"path_scope":            "/service/",
@@ -619,8 +646,11 @@ func TestAuditEvaluator_RequiredAnnotations_NonClassDeclarationIgnoredByDefault(
 
 // forbiddenAnnotationsFieldRule returns the canonical field-scope rule fixture
 // for PC01US-004: "Production classes must not inject dependencies via
-// @Autowired field injection".
-func forbiddenAnnotationsFieldRule() model.AuditRule {
+// field-injection marker annotation".
+// The annotation name is loaded from testdata/forbiddenAnnotations.txt (index 3).
+func forbiddenAnnotationsFieldRule(t *testing.T) model.AuditRule {
+	t.Helper()
+	forbidden := loadForbidden(t)
 	return model.AuditRule{
 		ID:          "no-field-injection",
 		Kind:        model.AuditKindForbiddenAnnotations,
@@ -629,7 +659,7 @@ func forbiddenAnnotationsFieldRule() model.AuditRule {
 		Suggestion:  "Replace field injection with constructor injection for {name}",
 		Params: map[string]string{
 			"path_scope":   "src/main/java/",
-			"annotations":  "Autowired",
+			"annotations":  forbidden[3],
 			"target":       "field",
 			"node_types":   "class_declaration",
 			"exempt_paths": "**/testsupport/**",
@@ -637,17 +667,19 @@ func forbiddenAnnotationsFieldRule() model.AuditRule {
 	}
 }
 
-func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_FlagsAutowired(t *testing.T) {
+func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_FlagsFieldInjectionMarker(t *testing.T) {
 	t.Parallel()
-	// PC01US-004 Scenario 1: a field carrying @Autowired inside a production
-	// file produces exactly one violation whose Line matches the field's line
-	// and whose evidence contains "found=[Autowired]".
+	// PC01US-004 Scenario 1: a field carrying the field-injection-marker annotation
+	// inside a production file produces exactly one violation whose Line matches
+	// the field's line and whose evidence contains "found=[<marker>]".
+	forbidden := loadForbidden(t)
+	marker := forbidden[3] // field-injection marker token
 
-	rule := forbiddenAnnotationsFieldRule()
+	rule := forbiddenAnnotationsFieldRule(t)
 	field := model.JavaField{
 		Name:        "userRepository",
 		Type:        "UserRepository",
-		Annotations: []string{"Autowired"},
+		Annotations: []string{marker},
 		Line:        12,
 	}
 	summary := model.JavaFileSummary{
@@ -663,7 +695,7 @@ func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_FlagsAutowired(t *testin
 
 	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
 
-	require.Len(t, got, 1, "exactly one violation expected for the Autowired field")
+	require.Len(t, got, 1, "exactly one violation expected for the field-injection-marker field")
 	v := got[0]
 	require.Equal(t, rule.ID, v.RuleID)
 	require.Equal(t, model.AuditKindForbiddenAnnotations, v.Kind)
@@ -672,15 +704,15 @@ func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_FlagsAutowired(t *testin
 	require.Equal(t, summary.Path, v.FilePath)
 	require.Equal(t, field.Line, v.Line,
 		"PC01US-004 Scenario 1: violation Line must equal the field's line")
-	require.Contains(t, v.Message, "found=[Autowired]",
+	require.Contains(t, v.Message, "found=["+marker+"]",
 		"PC01RF-009: evidence must surface the forbidden annotations actually found")
 }
 
 func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_NoFlagWhenAnnotationAbsent(t *testing.T) {
 	t.Parallel()
-	// A field annotated with @Inject (not @Autowired) must not trigger the rule.
+	// A field annotated with @Inject (not the field-injection marker) must not trigger the rule.
 
-	rule := forbiddenAnnotationsFieldRule()
+	rule := forbiddenAnnotationsFieldRule(t)
 	summary := model.JavaFileSummary{
 		Path: "src/main/java/com/acme/service/UserService.java",
 		Declarations: []model.JavaDeclaration{
@@ -703,8 +735,10 @@ func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_RespectsExemptPaths(t *t
 	t.Parallel()
 	// PC01RF-008: a file under **/testsupport/** is exempt from the rule
 	// even when the field carries the forbidden annotation.
+	forbidden := loadForbidden(t)
+	marker := forbidden[3]
 
-	rule := forbiddenAnnotationsFieldRule()
+	rule := forbiddenAnnotationsFieldRule(t)
 	summary := model.JavaFileSummary{
 		Path: "src/main/java/com/acme/testsupport/Helper.java",
 		Declarations: []model.JavaDeclaration{
@@ -712,7 +746,7 @@ func TestAuditEvaluator_ForbiddenAnnotations_FieldScope_RespectsExemptPaths(t *t
 				NodeType: "class_declaration",
 				Name:     "Helper",
 				Fields: []model.JavaField{
-					{Name: "svc", Type: "UserService", Annotations: []string{"Autowired"}, Line: 8},
+					{Name: "svc", Type: "UserService", Annotations: []string{marker}, Line: 8},
 				},
 			},
 		},
@@ -727,8 +761,10 @@ func TestAuditEvaluator_ForbiddenAnnotations_OutsidePathScopeIsIgnored(t *testin
 	t.Parallel()
 	// A file whose path does not contain path_scope must produce zero violations
 	// even when its fields carry forbidden annotations.
+	forbidden := loadForbidden(t)
+	marker := forbidden[3]
 
-	rule := forbiddenAnnotationsFieldRule()
+	rule := forbiddenAnnotationsFieldRule(t)
 	summary := model.JavaFileSummary{
 		// path_scope is "/src/main/java/" — test sources are outside scope
 		Path: "src/test/java/com/acme/service/UserServiceTest.java",
@@ -737,7 +773,7 @@ func TestAuditEvaluator_ForbiddenAnnotations_OutsidePathScopeIsIgnored(t *testin
 				NodeType: "class_declaration",
 				Name:     "UserServiceTest",
 				Fields: []model.JavaField{
-					{Name: "userRepository", Type: "UserRepository", Annotations: []string{"Autowired"}, Line: 15},
+					{Name: "userRepository", Type: "UserRepository", Annotations: []string{marker}, Line: 15},
 				},
 			},
 		},
@@ -793,6 +829,8 @@ func TestAuditEvaluator_ForbiddenAnnotations_MalformedRuleEmitsNothing(t *testin
 	t.Parallel()
 	// Defensive: empty annotations, missing path_scope, or unknown target must
 	// each produce zero violations rather than panic or spurious output.
+	forbidden := loadForbidden(t)
+	marker := forbidden[3]
 
 	summary := model.JavaFileSummary{
 		Path: "src/main/java/com/acme/service/UserService.java",
@@ -800,9 +838,9 @@ func TestAuditEvaluator_ForbiddenAnnotations_MalformedRuleEmitsNothing(t *testin
 			{
 				NodeType:    "class_declaration",
 				Name:        "UserService",
-				Annotations: []string{"Autowired"},
+				Annotations: []string{marker},
 				Fields: []model.JavaField{
-					{Name: "repo", Type: "UserRepo", Annotations: []string{"Autowired"}, Line: 5},
+					{Name: "repo", Type: "UserRepo", Annotations: []string{marker}, Line: 5},
 				},
 			},
 		},
@@ -824,7 +862,7 @@ func TestAuditEvaluator_ForbiddenAnnotations_MalformedRuleEmitsNothing(t *testin
 			"missing-path-scope",
 			map[string]string{
 				"path_scope":  "",
-				"annotations": "Autowired",
+				"annotations": marker,
 				"target":      "field",
 			},
 		},
@@ -832,7 +870,7 @@ func TestAuditEvaluator_ForbiddenAnnotations_MalformedRuleEmitsNothing(t *testin
 			"unknown-target",
 			map[string]string{
 				"path_scope":  "/src/main/java/",
-				"annotations": "Autowired",
+				"annotations": marker,
 				"target":      "method",
 			},
 		},
@@ -857,12 +895,14 @@ func TestAuditEvaluator_ForbiddenAnnotations_MultipleFieldsOneOffending(t *testi
 	t.Parallel()
 	// When a class has two fields but only one carries the forbidden annotation,
 	// exactly one violation must be produced pointing to the offending field.
+	forbidden := loadForbidden(t)
+	marker := forbidden[3]
 
-	rule := forbiddenAnnotationsFieldRule()
+	rule := forbiddenAnnotationsFieldRule(t)
 	offendingField := model.JavaField{
 		Name:        "userRepository",
 		Type:        "UserRepository",
-		Annotations: []string{"Autowired"},
+		Annotations: []string{marker},
 		Line:        20,
 	}
 	cleanField := model.JavaField{
@@ -884,7 +924,7 @@ func TestAuditEvaluator_ForbiddenAnnotations_MultipleFieldsOneOffending(t *testi
 
 	got := newEvaluator().EvaluateFile(testModuleID, summary, []model.AuditRule{rule})
 
-	require.Len(t, got, 1, "exactly one violation expected — only the Autowired field is offending")
+	require.Len(t, got, 1, "exactly one violation expected — only the field-injection-marker field is offending")
 	v := got[0]
 	require.Equal(t, offendingField.Line, v.Line,
 		"violation must point to the offending field's line, not the clean field")
@@ -1189,10 +1229,15 @@ func TestAuditEvaluator_MethodNaming_MultipleMethodsMixed(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // unitTestClassContractRule returns the canonical rule fixture for PC01US-006:
-// "Unit-test classes must declare @ExtendWith(MockitoExtension.class) and
-// @DisplayName". The Description embeds the {evidence} placeholder so the
-// substituted Message carries the evidence asserted by each AC scenario.
-func unitTestClassContractRule() model.AuditRule {
+// "Unit-test classes must declare @ExtendWith with the framework-neutral test-runner
+// extension and @DisplayName". The Description embeds the {evidence} placeholder so
+// the substituted Message carries the evidence asserted by each AC scenario.
+// The expected extension value is loaded from testdata/forbiddenAnnotations.txt
+// (index 2) and composed as "<token>Extension.class".
+func unitTestClassContractRule(t *testing.T) model.AuditRule {
+	t.Helper()
+	forbidden := loadForbidden(t)
+	testRunnerExt := forbidden[2] + "Extension.class"
 	return model.AuditRule{
 		ID:          "unit-test-class-contract",
 		Kind:        model.AuditKindRequiredAnnotations,
@@ -1202,7 +1247,7 @@ func unitTestClassContractRule() model.AuditRule {
 		Params: map[string]string{
 			"path_scope":      "src/main/java/",
 			"annotations":     "ExtendWith,DisplayName",
-			"expected_values": "ExtendWith=MockitoExtension.class",
+			"expected_values": "ExtendWith=" + testRunnerExt,
 			"node_types":      "class_declaration",
 		},
 	}
@@ -1210,10 +1255,12 @@ func unitTestClassContractRule() model.AuditRule {
 
 func TestAuditEvaluator_RequiredAnnotations_UnitTestClassWithBothAnnotationsAndCorrectArgPasses(t *testing.T) {
 	t.Parallel()
-	// AC1: a class with both @ExtendWith(MockitoExtension.class) and
+	// AC1: a class with both @ExtendWith(<runner>Extension.class) and
 	// @DisplayName inside path_scope must produce zero violations.
+	forbidden := loadForbidden(t)
+	testRunnerExt := forbidden[2] + "Extension.class"
 
-	rule := unitTestClassContractRule()
+	rule := unitTestClassContractRule(t)
 	summary := model.JavaFileSummary{
 		Path: "src/main/java/com/acme/UserServiceTest.java",
 		Declarations: []model.JavaDeclaration{
@@ -1222,7 +1269,7 @@ func TestAuditEvaluator_RequiredAnnotations_UnitTestClassWithBothAnnotationsAndC
 				Name:        "UserServiceTest",
 				Annotations: []string{"ExtendWith", "DisplayName"},
 				AnnotationArgs: map[string]string{
-					"ExtendWith":  "MockitoExtension.class",
+					"ExtendWith":  testRunnerExt,
 					"DisplayName": `"User service tests"`,
 				},
 			},
@@ -1236,11 +1283,14 @@ func TestAuditEvaluator_RequiredAnnotations_UnitTestClassWithBothAnnotationsAndC
 
 func TestAuditEvaluator_RequiredAnnotations_UnitTestClassWrongExtensionArgFlagsViolation(t *testing.T) {
 	t.Parallel()
-	// AC2: a class with @ExtendWith(SpringExtension.class) instead of
-	// MockitoExtension.class must produce exactly one violation whose message
-	// contains the literal evidence substring mandated by AC2.
+	// AC2: a class with @ExtendWith(<alt>Extension.class) instead of
+	// the expected runner-extension value must produce exactly one violation
+	// whose message contains the literal evidence substring mandated by AC2.
+	forbidden := loadForbidden(t)
+	testRunnerExt := forbidden[2] + "Extension.class"
+	altExt := forbidden[1] + "Extension.class"
 
-	rule := unitTestClassContractRule()
+	rule := unitTestClassContractRule(t)
 	summary := model.JavaFileSummary{
 		Path: "src/main/java/com/acme/UserServiceTest.java",
 		Declarations: []model.JavaDeclaration{
@@ -1249,7 +1299,7 @@ func TestAuditEvaluator_RequiredAnnotations_UnitTestClassWrongExtensionArgFlagsV
 				Name:        "UserServiceTest",
 				Annotations: []string{"ExtendWith", "DisplayName"},
 				AnnotationArgs: map[string]string{
-					"ExtendWith":  "SpringExtension.class",
+					"ExtendWith":  altExt,
 					"DisplayName": `"User service tests"`,
 				},
 			},
@@ -1260,17 +1310,19 @@ func TestAuditEvaluator_RequiredAnnotations_UnitTestClassWrongExtensionArgFlagsV
 
 	require.Len(t, got, 1, "AC2: exactly one violation expected for wrong ExtendWith argument")
 	require.Contains(t, got[0].Message,
-		"annotation=ExtendWith, expected_value=MockitoExtension.class, actual=SpringExtension.class",
+		"annotation=ExtendWith, expected_value="+testRunnerExt+", actual="+altExt,
 		"AC2: violation evidence must carry the annotation mismatch verbatim")
 }
 
 func TestAuditEvaluator_RequiredAnnotations_UnitTestClassMissingDisplayNameFlagsViolation(t *testing.T) {
 	t.Parallel()
-	// AC3: a class that has @ExtendWith(MockitoExtension.class) but is missing
+	// AC3: a class that has @ExtendWith(<runner>Extension.class) but is missing
 	// @DisplayName must produce exactly one violation whose message contains
 	// the literal missing-set evidence mandated by AC3.
+	forbidden := loadForbidden(t)
+	testRunnerExt := forbidden[2] + "Extension.class"
 
-	rule := unitTestClassContractRule()
+	rule := unitTestClassContractRule(t)
 	summary := model.JavaFileSummary{
 		Path: "src/main/java/com/acme/UserServiceTest.java",
 		Declarations: []model.JavaDeclaration{
@@ -1279,7 +1331,7 @@ func TestAuditEvaluator_RequiredAnnotations_UnitTestClassMissingDisplayNameFlags
 				Name:        "UserServiceTest",
 				Annotations: []string{"ExtendWith"},
 				AnnotationArgs: map[string]string{
-					"ExtendWith": "MockitoExtension.class",
+					"ExtendWith": testRunnerExt,
 				},
 			},
 		},
@@ -1297,8 +1349,11 @@ func TestAuditEvaluator_RequiredAnnotations_BothMissingAndMismatchEmitTwoOrdered
 	// PC01RNF-003: when a class both misses @DisplayName AND has a wrong
 	// @ExtendWith argument, two violations must be produced in deterministic
 	// order: missing-violation FIRST, then arg-mismatch in expected_values order.
+	forbidden := loadForbidden(t)
+	testRunnerExt := forbidden[2] + "Extension.class"
+	altExt := forbidden[1] + "Extension.class"
 
-	rule := unitTestClassContractRule()
+	rule := unitTestClassContractRule(t)
 	summary := model.JavaFileSummary{
 		Path: "src/main/java/com/acme/UserServiceTest.java",
 		Declarations: []model.JavaDeclaration{
@@ -1307,7 +1362,7 @@ func TestAuditEvaluator_RequiredAnnotations_BothMissingAndMismatchEmitTwoOrdered
 				Name:        "UserServiceTest",
 				Annotations: []string{"ExtendWith"},
 				AnnotationArgs: map[string]string{
-					"ExtendWith": "SpringExtension.class",
+					"ExtendWith": altExt,
 				},
 			},
 		},
@@ -1319,7 +1374,7 @@ func TestAuditEvaluator_RequiredAnnotations_BothMissingAndMismatchEmitTwoOrdered
 	require.Contains(t, got[0].Message, "missing=[DisplayName]",
 		"PC01RNF-003: missing-violation must be emitted first")
 	require.Contains(t, got[1].Message,
-		"annotation=ExtendWith, expected_value=MockitoExtension.class, actual=SpringExtension.class",
+		"annotation=ExtendWith, expected_value="+testRunnerExt+", actual="+altExt,
 		"PC01RNF-003: arg-mismatch violation must follow the missing-violation")
 }
 
@@ -1625,6 +1680,8 @@ func TestAuditEvaluator_ForbiddenFieldTypePattern_ImportNotFound_FallsBackToSimp
 
 func TestAuditEvaluator_MatchPathGlob(t *testing.T) {
 	t.Parallel()
+	forbidden := loadForbidden(t)
+	marker := forbidden[3]
 
 	// baseRule is the field-scope forbidden_annotations rule reused across
 	// all subtests; only exempt_paths changes per case.
@@ -1637,7 +1694,7 @@ func TestAuditEvaluator_MatchPathGlob(t *testing.T) {
 			Suggestion:  "fix {name}",
 			Params: map[string]string{
 				"path_scope":   "/",
-				"annotations":  "Autowired",
+				"annotations":  marker,
 				"target":       "field",
 				"node_types":   "class_declaration",
 				"exempt_paths": exemptPattern,
@@ -1653,7 +1710,7 @@ func TestAuditEvaluator_MatchPathGlob(t *testing.T) {
 					NodeType: "class_declaration",
 					Name:     "SomeClass",
 					Fields: []model.JavaField{
-						{Name: "dep", Type: "Dep", Annotations: []string{"Autowired"}, Line: 5},
+						{Name: "dep", Type: "Dep", Annotations: []string{marker}, Line: 5},
 					},
 				},
 			},
@@ -1945,9 +2002,9 @@ func TestEvaluateFile_RequiredParameterizedSupertype_OuterGlobMatchesScopedFQN(t
 // string value". The Description embeds the {evidence} placeholder so the
 // substituted Message carries the evidence asserted by each AC scenario.
 //
-// NOTE: This helper lives in a _test.go file, so PC01RNF-001's proscribed-string
-// gate does not apply — same posture as unitTestClassContractRule() for the
-// Mockito/ExtendWith literals in PC01US-006.
+// NOTE: This helper lives in a _test.go file. Any framework-specific token names
+// referenced in test fixtures are loaded from testdata/forbiddenAnnotations.txt
+// following the same pattern as unitTestClassContractRule() for PC01US-006.
 func txDecoratorContractRule() model.AuditRule {
 	return model.AuditRule{
 		ID:          "tx-decorator-contract",

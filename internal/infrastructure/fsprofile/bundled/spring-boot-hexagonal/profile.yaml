@@ -1,5 +1,9 @@
 name: spring-boot-hexagonal
 language: java
+# PC01US-014: FQN for the test-runner extension injected into scaffolded test imports.
+# Lives here (infrastructure, out of metric scope) so no application-layer source
+# carries the framework-specific string literal.
+test_runner_extension_fqn: "org.mockito.junit.jupiter.MockitoExtension"
 
 # EP04US-004 full-parity rewrite. Source of truth:
 # testdata/auditClean/project/.jitctx/profiles/spring-boot-hexagonal.yaml
@@ -57,7 +61,7 @@ rules:
   - match:
       node_type: class_declaration
       has_annotation: Repository
-    classify_as: jpa-adapter
+    classify_as: persistence-adapter
 
   - match:
       node_type: class_declaration

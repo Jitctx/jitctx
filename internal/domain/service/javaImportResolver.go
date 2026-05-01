@@ -13,7 +13,7 @@ import (
 //
 // Algorithm (stateless):
 //
-//  1. For service/rest-adapter/jpa-adapter: for each name in target.DependsOn
+//  1. For service/rest-adapter/persistence-adapter: for each name in target.DependsOn
 //     (and target.Uses for rest-adapter), look up the contract by name in
 //     spec.Contracts; if found, FQN = modulePackage + "." + dotPath(typePath).
 //  2. For service: also FQN of target.Implements.
@@ -22,11 +22,11 @@ import (
 //     rest-adapter   → "org.springframework.web.bind.annotation.RestController"
 //     + per-endpoint VERB-mapping import (GetMapping, …)
 //     entity / aggregate-root → "jakarta.persistence.Entity"
-//     3a. For entity / aggregate-root: consult NewJPAFieldAnnotator() predicates
+//     3a. For entity / aggregate-root: consult NewIDFieldAnnotator() predicates
 //     to add "jakarta.persistence.Id" when any field is id-named, and
 //     "jakarta.persistence.GeneratedValue" + "jakarta.persistence.GenerationType"
 //     when that id field has type Long.
-//     jpa-adapter    → "org.springframework.stereotype.Repository"
+//     persistence-adapter → "org.springframework.stereotype.Repository"
 //  4. External names (not in spec) are ignored — the use case logs them as
 //     warnings; the resolver does NOT fabricate FQNs.
 //  5. Deduplicate, sort lexicographically.
@@ -62,7 +62,7 @@ func (r JavaImportResolver) Resolve(spec model.FeatureSpec, target model.SpecCon
 	case model.ContractRestAdapter:
 		refs = append(refs, target.Uses...)
 		refs = append(refs, target.DependsOn...)
-	case model.ContractJPAAdapter:
+	case model.ContractPersistenceAdapter:
 		refs = append(refs, target.Implements)
 		refs = append(refs, target.DependsOn...)
 	}
@@ -119,7 +119,7 @@ func (r JavaImportResolver) Resolve(spec model.FeatureSpec, target model.SpecCon
 		}
 	case model.ContractEntity, model.ContractAggregate:
 		seen["jakarta.persistence.Entity"] = struct{}{}
-		annotator := NewJPAFieldAnnotator()
+		annotator := NewIDFieldAnnotator()
 		if annotator.HasIDField(target.Fields) {
 			seen["jakarta.persistence.Id"] = struct{}{}
 		}
@@ -127,7 +127,7 @@ func (r JavaImportResolver) Resolve(spec model.FeatureSpec, target model.SpecCon
 			seen["jakarta.persistence.GeneratedValue"] = struct{}{}
 			seen["jakarta.persistence.GenerationType"] = struct{}{}
 		}
-	case model.ContractJPAAdapter:
+	case model.ContractPersistenceAdapter:
 		seen["org.springframework.stereotype.Repository"] = struct{}{}
 	}
 

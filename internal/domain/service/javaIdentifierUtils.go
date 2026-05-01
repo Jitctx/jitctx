@@ -15,7 +15,7 @@ func NewJavaIdentifierUtils() JavaIdentifierUtils { return JavaIdentifierUtils{}
 //
 //	"UserRepository"  → "userRepository"
 //	"URLBuilder"      → "uRLBuilder"  (intentionally simple — no acronym
-//	                                    smarts; matches Spring/Lombok docs)
+//	                                    smarts; matches framework docs)
 //	""                → ""            (caller validates non-empty upstream)
 func (JavaIdentifierUtils) FieldNameFromType(typeName string) string {
 	if typeName == "" {

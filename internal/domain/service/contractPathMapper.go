@@ -6,21 +6,21 @@ import (
 )
 
 // ContractPathMapper maps a (ContractType, name) pair to a workdir-
-// relative target file path under the Spring Boot Hexagonal layout.
+// relative target file path under the bundled persistence-hexagonal layout.
 // This is a thin pure function; when EP02US-008 lands the framework-
 // driven templates, the mapping moves into the profile and this service
 // either becomes a thin wrapper or is deleted. Documented decision: see
 // §8 Q6.
 //
-// Mapping (Spring Boot Hexagonal, hardcoded for EP02US-003):
+// Mapping (bundled persistence-hexagonal layout, hardcoded for EP02US-003):
 //
-//	input-port      → port/in/<Name>.java
-//	output-port     → port/out/<Name>.java
-//	service         → application/<Name>.java
-//	rest-adapter    → adapter/in/web/<Name>.java
-//	entity          → domain/<Name>.java
-//	aggregate-root  → domain/<Name>.java
-//	jpa-adapter     → adapter/out/persistence/<Name>.java
+//	input-port          → port/in/<Name>.java
+//	output-port         → port/out/<Name>.java
+//	service             → application/<Name>.java
+//	rest-adapter        → adapter/in/web/<Name>.java
+//	entity              → domain/<Name>.java
+//	aggregate-root      → domain/<Name>.java
+//	persistence-adapter → adapter/out/persistence/<Name>.java
 type ContractPathMapper struct{}
 
 // NewContractPathMapper returns a stateless mapper.
@@ -32,8 +32,8 @@ var supportedTypes = []string{
 	"aggregate-root",
 	"entity",
 	"input-port",
-	"jpa-adapter",
 	"output-port",
+	"persistence-adapter",
 	"rest-adapter",
 	"service",
 }
@@ -56,7 +56,7 @@ func (ContractPathMapper) Map(t model.ContractType, name string) (string, error)
 		return "domain/" + name + ".java", nil
 	case model.ContractAggregate:
 		return "domain/" + name + ".java", nil
-	case model.ContractJPAAdapter:
+	case model.ContractPersistenceAdapter:
 		return "adapter/out/persistence/" + name + ".java", nil
 	default:
 		return "", &domerr.UnsupportedContractTypeError{

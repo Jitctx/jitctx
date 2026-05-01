@@ -1,0 +1,19 @@
+schema_version: 2
+generated_at: 2026-04-29T00:00:00Z
+stack:
+  languages:
+    - java
+  frameworks:
+    - spring-boot-hexagonal
+modules:
+  - id: com.acme.testsupport
+    path: src/main/java/com/acme/testsupport
+    tags: []
+    contracts:
+      - name: Helper
+        types:
+          - service
+        path: src/main/java/com/acme/testsupport/Helper.java
+        methods: []
+    dependencies: []
+contexts: []

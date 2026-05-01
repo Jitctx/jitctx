@@ -17,13 +17,14 @@ type bundleDTO struct {
 	Language  string   `yaml:"language"`  // singular — EP-04 schema
 	Languages []string `yaml:"languages"` // legacy plural — kept so the
 	//  same decoder works on EP-03 sample files
-	QueryLang       string               `yaml:"query_lang"`       // legacy EP-03
-	Detect          bundleDetectDTO      `yaml:"detect"`           // legacy EP-03
-	ModuleDetection bundleModuleDetDTO   `yaml:"module_detection"` // legacy EP-03
-	Rules           []bundleRuleDTO      `yaml:"rules"`            // legacy EP-03
-	Types           []bundleTypeDTO      `yaml:"types"`
-	AuditRules      []bundleAuditRuleDTO `yaml:"audit_rules"`
-	Packaging       *yaml.Node           `yaml:"packaging"`
+	QueryLang              string               `yaml:"query_lang"`       // legacy EP-03
+	Detect                 bundleDetectDTO      `yaml:"detect"`           // legacy EP-03
+	ModuleDetection        bundleModuleDetDTO   `yaml:"module_detection"` // legacy EP-03
+	Rules                  []bundleRuleDTO      `yaml:"rules"`            // legacy EP-03
+	Types                  []bundleTypeDTO      `yaml:"types"`
+	AuditRules             []bundleAuditRuleDTO `yaml:"audit_rules"`
+	Packaging              *yaml.Node           `yaml:"packaging"`
+	TestRunnerExtensionFQN string               `yaml:"test_runner_extension_fqn"` // PC01US-014
 }
 
 // bundleDetectDTO mirrors detectDTO for the legacy flat-YAML schema.

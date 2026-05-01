@@ -9,10 +9,10 @@ import (
 	scaffoldvo "github.com/jitctx/jitctx/internal/domain/vo/scaffold"
 )
 
-func TestJPAFieldAnnotator_Annotate(t *testing.T) {
+func TestIDFieldAnnotator_Annotate(t *testing.T) {
 	t.Parallel()
 
-	annotator := service.NewJPAFieldAnnotator()
+	annotator := service.NewIDFieldAnnotator()
 
 	tests := []struct {
 		name      string
@@ -127,10 +127,10 @@ func TestJPAFieldAnnotator_Annotate(t *testing.T) {
 	})
 }
 
-func TestJPAFieldAnnotator_HasIDField(t *testing.T) {
+func TestIDFieldAnnotator_HasIDField(t *testing.T) {
 	t.Parallel()
 
-	annotator := service.NewJPAFieldAnnotator()
+	annotator := service.NewIDFieldAnnotator()
 
 	tests := []struct {
 		name      string
@@ -169,10 +169,10 @@ func TestJPAFieldAnnotator_HasIDField(t *testing.T) {
 	}
 }
 
-func TestJPAFieldAnnotator_HasGeneratedValueField(t *testing.T) {
+func TestIDFieldAnnotator_HasGeneratedValueField(t *testing.T) {
 	t.Parallel()
 
-	annotator := service.NewJPAFieldAnnotator()
+	annotator := service.NewIDFieldAnnotator()
 
 	tests := []struct {
 		name      string

@@ -81,17 +81,17 @@ func TestContractRoleDescriber_Describe(t *testing.T) {
 			wantRole: "REST adapter",
 		},
 		{
-			name: "JPAAdapterWithImplements",
+			name: "PersistenceAdapterWithImplements",
 			contract: model.SpecContract{
-				Type:       model.ContractJPAAdapter,
+				Type:       model.ContractPersistenceAdapter,
 				Implements: "X",
 			},
-			wantRole: "JPA adapter implementing X",
+			wantRole: "Persistence adapter implementing X",
 		},
 		{
-			name:     "JPAAdapterPlain",
-			contract: model.SpecContract{Type: model.ContractJPAAdapter},
-			wantRole: "JPA adapter",
+			name:     "PersistenceAdapterPlain",
+			contract: model.SpecContract{Type: model.ContractPersistenceAdapter},
+			wantRole: "Persistence adapter",
 		},
 		{
 			name:     "Unknown",

@@ -17,16 +17,16 @@ package scaffold
 //	                already prefixed with '@'; framework + spec-declared, deduped.
 //	Implements      simple type name the class implements (services only); ""
 //	                when not applicable.
-//	Fields          typed declarations (Type, Name, JPA annotations) computed by
-//	                service.JPAFieldAnnotator from the spec's raw `Type Name` strings.
+//	Fields          typed declarations (Type, Name, persistence annotations) computed by
+//	                service.IDFieldAnnotator from the spec's raw `Type Name` strings.
 //	                Empty when the contract type does not declare fields (services,
 //	                rest-adapters, ports).
 //	Methods         interface-method declarations (input-port / output-port)
-//	                OR @Override stubs (service / jpa-adapter); rendered as-is
+//	                OR @Override stubs (service / persistence-adapter); rendered as-is
 //	                plus a "throw new UnsupportedOperationException(...)" body
 //	                for class types. The use case pre-builds these strings.
 //	Endpoints       parsed Endpoint records (rest-adapter only).
-//	Dependencies    constructor injection records (service / rest-adapter / jpa-adapter).
+//	Dependencies    constructor injection records (service / rest-adapter / persistence-adapter).
 type RenderInput struct {
 	ContractType     string
 	Package          string
@@ -66,7 +66,7 @@ type RenderedEndpoint struct {
 	Body       string
 }
 
-// ConstructorDep is one DI parameter on a service / rest-adapter / jpa-adapter.
+// ConstructorDep is one DI parameter on a service / rest-adapter / persistence-adapter.
 //
 //	Type:       simple Java type name (e.g., "UserRepository"). FQN imports
 //	            are handled separately via Imports.

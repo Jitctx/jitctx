@@ -30,7 +30,7 @@ func TestSpecContract_FieldsAccessible(t *testing.T) {
 		{"aggregate-root", model.ContractAggregate},
 		{"service", model.ContractService},
 		{"rest-adapter", model.ContractRestAdapter},
-		{"jpa-adapter", model.ContractJPAAdapter},
+		{"persistence-adapter", model.ContractPersistenceAdapter},
 	}
 
 	for _, tc := range tests {

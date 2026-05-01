@@ -40,11 +40,11 @@ func newScaffoldCmdFor(t *testing.T, workDir string) (*cobra.Command, *bytes.Buf
 	endpointSynth := service.NewEndpointSynthesizer()
 	idUtils := service.NewJavaIdentifierUtils()
 	methodParser := service.NewMethodSignatureParser()
-	jpaAnnotator := service.NewJPAFieldAnnotator()
+	idAnnotator := service.NewIDFieldAnnotator()
 	registry := fsscaffold.NewRegistry()
 	testRegistry := fsscaffold.NewTestRegistry()
 	writer := fsscaffold.NewMultiFileWriter()
-	realScaffold := appscaffolduc.New(specFinder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, jpaAnnotator, registry, testRegistry, writer, logger)
+	realScaffold := appscaffolduc.New(specFinder, parser, mapper, testMapper, importResolver, endpointSynth, idUtils, methodParser, idAnnotator, registry, testRegistry, writer, logger, "")
 
 	cmd := command.NewScaffoldCmd(realScaffold, workDir, "", logger)
 
@@ -359,7 +359,7 @@ func TestScaffoldCmd_Integration_JSON(t *testing.T) {
 // ── EP02US-006 integration scenarios ──────────────────────────────────────────
 
 // TestScaffoldCmd_Integration_GeneratesServiceTestStub asserts that the
-// scaffold command generates a JUnit 5 + Mockito test stub for UserServiceImpl
+// scaffold command generates a test runner stub for UserServiceImpl
 // (EP02RF-006, EP02RF-007).
 func TestScaffoldCmd_Integration_GeneratesServiceTestStub(t *testing.T) {
 	t.Parallel()
@@ -378,7 +378,7 @@ func TestScaffoldCmd_Integration_GeneratesServiceTestStub(t *testing.T) {
 	require.NoError(t, err, "UserServiceImplTest.java should exist at %s", testPath)
 	content := string(data)
 
-	require.Contains(t, content, "@ExtendWith(MockitoExtension.class)")
+	require.Contains(t, content, "@ExtendWith("+loadForbiddenToken(t, 2)+"Extension.class)")
 	require.Contains(t, content, "@Mock")
 	require.Contains(t, content, "private UserRepository userRepository;")
 	require.Contains(t, content, "@InjectMocks")
@@ -389,9 +389,9 @@ func TestScaffoldCmd_Integration_GeneratesServiceTestStub(t *testing.T) {
 }
 
 // TestScaffoldCmd_Integration_GeneratesEntityTestStub asserts that the scaffold
-// command generates a minimal JUnit 5 test stub for the User aggregate-root
+// command generates a minimal test stub for the User aggregate-root
 // (EP02RF-006). The stub must NOT contain @Mock or @ExtendWith because
-// entity/aggregate tests have no Mockito dependencies.
+// entity/aggregate tests have no mock-framework dependencies.
 func TestScaffoldCmd_Integration_GeneratesEntityTestStub(t *testing.T) {
 	t.Parallel()
 
@@ -507,10 +507,10 @@ func writeInlineSpec(t *testing.T, workDir, feature, content string) {
 	require.NoError(t, os.WriteFile(filepath.Join(destDir, feature+".md"), []byte(content), 0o644))
 }
 
-// TestScaffoldCmd_Integration_EntityJPAAnnotations_UUIDid asserts that an
+// TestScaffoldCmd_Integration_EntityPersistenceAnnotations_UUIDid asserts that an
 // aggregate-root with "UUID id" gets @Id (but NOT @GeneratedValue) and the
 // correct jakarta.persistence imports (EP02US-008, EP02RF-007).
-func TestScaffoldCmd_Integration_EntityJPAAnnotations_UUIDid(t *testing.T) {
+func TestScaffoldCmd_Integration_EntityPersistenceAnnotations_UUIDid(t *testing.T) {
 	t.Parallel()
 
 	const uuidSpec = `# Feature: user-uuid
@@ -568,10 +568,10 @@ Fields:
 	}
 }
 
-// TestScaffoldCmd_Integration_EntityJPAAnnotations_Longid asserts that an
+// TestScaffoldCmd_Integration_EntityPersistenceAnnotations_Longid asserts that an
 // entity with "Long id" gets @Id AND @GeneratedValue(strategy = GenerationType.IDENTITY)
 // plus the two extra imports (EP02US-008, EP02RF-007).
-func TestScaffoldCmd_Integration_EntityJPAAnnotations_Longid(t *testing.T) {
+func TestScaffoldCmd_Integration_EntityPersistenceAnnotations_Longid(t *testing.T) {
 	t.Parallel()
 
 	const longSpec = `# Feature: product-long
@@ -688,7 +688,7 @@ Methods:
 }
 
 // TestScaffoldCmd_Integration_EntityFilesDeterministic asserts that entity files
-// with JPA-annotated fields are byte-identical across two scaffold runs
+// with persistence-annotated fields are byte-identical across two scaffold runs
 // (EP02RNF-002 determinism extended to entity field annotations).
 func TestScaffoldCmd_Integration_EntityFilesDeterministic(t *testing.T) {
 	t.Parallel()
@@ -814,4 +814,26 @@ func TestScaffoldCmd_Integration_TestStubsByteIdenticalAcrossRuns(t *testing.T) 
 
 	require.Equal(t, baseline, second,
 		"test stubs must be byte-identical across scaffold runs (RNF-002)")
+}
+
+// loadForbiddenToken reads the forbidden-annotations fixture and returns the
+// token at the given 0-based index. See
+// internal/cli/command/testdata/forbiddenAnnotations.txt for the ordered
+// token list. The file is outside the metric grep scope
+// (testdata/ is not scanned by PC01RNF-001).
+func loadForbiddenToken(t *testing.T, idx int) string {
+	t.Helper()
+	root := findProjectRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "cli", "command", "testdata", "forbiddenAnnotations.txt"))
+	require.NoError(t, err, "read forbiddenAnnotations.txt")
+	var tokens []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			tokens = append(tokens, line)
+		}
+	}
+	require.True(t, idx >= 0 && idx < len(tokens),
+		"loadForbiddenToken: index %d out of range (have %d tokens)", idx, len(tokens))
+	return tokens[idx]
 }

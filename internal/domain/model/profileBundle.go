@@ -47,6 +47,15 @@ type ProfileBundle struct {
 	// pointer is shared across every ProfileBundle whose Profile.Language
 	// matches — the registry caches by language id (EP04US-005 Scenario 3).
 	LanguageQueries *LanguageQuerySet
+
+	// TestRunnerExtensionFQN is the fully-qualified class name of the
+	// runner extension that scaffolded test classes must reference
+	// (for example the bundled persistence-hexagonal profile supplies
+	// the extension for its test runner). Empty string means the
+	// scaffold renderer omits the @ExtendWith line entirely.
+	// PC01US-014: added so scaffolduc no longer carries a framework-
+	// specific import string in application-layer source.
+	TestRunnerExtensionFQN string
 }
 
 // GetTemplate returns the bytes of the named template, keyed by
